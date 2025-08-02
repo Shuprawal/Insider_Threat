@@ -38,17 +38,19 @@ INSTALLED_APPS = [
     # 'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
-    # 'django.contrib.sessions',
+    'django.contrib.sessions',
     # 'django.contrib.messages',
     # 'django.contrib.staticfiles',
     'corsheaders',
     'ThreatDetection',
     'rest_framework',
     'channels',
+    'dashboard',
     # 'rest_framework.authtoken'
 ]
 
-
+USE_TZ = True
+TIME_ZONE = 'Asia/Kathmandu'
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
@@ -138,11 +140,11 @@ DATABASES = {
 
 LANGUAGE_CODE = 'en-us'
 
-TIME_ZONE = 'UTC'
+# TIME_ZONE = 'UTC'
 
 USE_I18N = True
 
-USE_TZ = True
+# USE_TZ = True
 
 
 # Static files (CSS, JavaScript, Images)

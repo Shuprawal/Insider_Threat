@@ -27,7 +27,7 @@ const LogAnalyzer = () => {
     setInfo('');
 
     try {
-      const response = await fetch('http://localhost:8000/api/analyze-logs/', {
+        const response = await fetch('http://localhost:8000/api/analyze-logs/', {
         method: 'POST',
         body: formData
       });
@@ -96,20 +96,29 @@ const LogAnalyzer = () => {
                     <th className="px-4 py-2 border">User</th>
                     <th className="px-4 py-2 border">Activity</th>
                     <th className="px-4 py-2 border">Date</th>
+                    <th className="px-4 py-2 border">Confidence</th> {/* NEW */}
+                    <th className="px-4 py-2 border">Score</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {anomalies.map((row, idx) => (
-                    <tr
-                      key={idx}
-                      className="text-center hover:bg-red-50 transition"
-                    >
-                      <td className="border px-4 py-2 font-medium text-gray-800">{row.user}</td>
-                      <td className="border px-4 py-2 text-red-600 font-semibold">{row.activity}</td>
-                      <td className="border px-4 py-2 text-sm text-gray-600">{row.date}</td>
-                    </tr>
-                  ))}
+                  {anomalies.map((row, idx) => {
+                    const isThreat = row.confidence >= 50; // You can adjust this threshold
+                    const activityStyle = isThreat
+                      ? "bg-red-100 text-red-800 font-bold"
+                      : "bg-green-100 text-green-800 font-bold";
+
+                    return (
+                      <tr key={idx} className="text-center transition hover:bg-gray-50">
+                        <td className="border px-4 py-2 font-medium text-gray-800">{row.user}</td>
+                        <td className={`border px-4 py-2 ${activityStyle}`}>{row.activity}</td>
+                        <td className="border px-4 py-2 text-sm text-gray-600">{new Date(row.timestamp).toLocaleString()}</td>
+                        <td className="border px-4 py-2 text-yellow-800 font-bold">{row.confidence}%</td>
+                        <td className="border px-4 py-2 text-purple-700">{row.score}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
+
               </table>
             </div>
           </div>

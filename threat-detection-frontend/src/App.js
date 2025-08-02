@@ -7,12 +7,15 @@ import AlertsPage from './components/AlertsPage';
 import CreateLogPage from './components/CreateLogPage';
 import LogAnalyzer from './components/LogAnalyzer';
 
+
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(!!localStorage.getItem('custom_token'));
 
   return (
     <Router>
       <Routes>
+
+
         <Route
           path="/login"
           element={

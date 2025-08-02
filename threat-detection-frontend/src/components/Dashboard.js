@@ -1,40 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
-import DashboardCharts from './DashboardCharts'
-
-
-// import {
-//   Line,
-//   Pie,
-//   Bar
-// } from 'react-chartjs-2';
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  BarElement,
-  PointElement,
-  LineElement,
-  ArcElement,
-  Tooltip,
-  Legend,
-  Title
-} from 'chart.js';
-
-ChartJS.register(
-  CategoryScale,
-  LinearScale,
-  BarElement,
-  PointElement,
-  LineElement,
-  ArcElement,
-  Tooltip,
-  Legend,
-  Title
-);
+import DashboardCharts from './DashboardCharts';
 
 function RealTimeInsiderThreatDashboardComponent({ setAuth }) {
+  const [hourLabels, setHourLabels] = useState([]);
+  const [hourScores, setHourScores] = useState([]);
   const [arrayOfSystemUserLogs, setArrayOfSystemUserLogs] = useState([]);
   const [numberOfOpenAlerts, setNumberOfOpenAlerts] = useState(0);
   const [realTimeThreatAlerts, setRealTimeThreatAlerts] = useState([]);
@@ -45,23 +16,23 @@ function RealTimeInsiderThreatDashboardComponent({ setAuth }) {
   const fetchLogsAndAlertsFromServer = async () => {
     setDashboardLoadingState(true);
     setErrorMessageOnDashboard('');
-
     try {
-      const authorizationTokenStored = localStorage.getItem('custom_token');
+      const token = localStorage.getItem('custom_token');
 
-      const retrievedLogs = await axios.get('http://localhost:8000/api/logs/all/', {
-        headers: { Authorization: `Bearer ${authorizationTokenStored}` },
-      });
+      const [logsRes, alertsRes, chartRes] = await Promise.all([
+        axios.get('http://localhost:8000/api/logs/all/', { headers: { Authorization: `Bearer ${token}` } }),
+        axios.get('http://localhost:8000/api/alerts/', { headers: { Authorization: `Bearer ${token}` } }),
+        axios.get('http://localhost:8000/api/dashboard-data/', { headers: { Authorization: `Bearer ${token}` } }),
+      ]);
 
-      const retrievedAlerts = await axios.get('http://localhost:8000/api/alerts/', {
-        headers: { Authorization: `Bearer ${authorizationTokenStored}` },
-      });
+      setArrayOfSystemUserLogs(logsRes.data.logs || []);
+      setNumberOfOpenAlerts(alertsRes.data.length || 0);
+      setHourLabels(chartRes.data.hourLabels || []);
+      setHourScores(chartRes.data.hourScores || []);
 
-      setArrayOfSystemUserLogs(retrievedLogs.data.logs || []);
-      setNumberOfOpenAlerts(retrievedAlerts.data.length || 0);
-    } catch (errorEncountered) {
-      setErrorMessageOnDashboard('🚨 Failed to retrieve logs or alerts. Please refresh.');
-      console.error('⚠️ Data retrieval error:', errorEncountered.response?.data || errorEncountered.message);
+    } catch (error) {
+      setErrorMessageOnDashboard('🚨 Failed to retrieve data. Please refresh.');
+      console.error('Error:', error);
     } finally {
       setDashboardLoadingState(false);
     }
@@ -69,68 +40,55 @@ function RealTimeInsiderThreatDashboardComponent({ setAuth }) {
 
   useEffect(() => {
     fetchLogsAndAlertsFromServer();
-
     const token = localStorage.getItem("custom_token");
-    const websocketConnectionForLiveThreats = new WebSocket(`ws://localhost:8000/ws/threats/?token=${token}`);
+    const socket = new WebSocket(`ws://localhost:8000/ws/threats/?token=${token}`);
 
-    websocketConnectionForLiveThreats.onmessage = (event) => {
+    socket.onmessage = (event) => {
       try {
-        const parsedLiveMessage = JSON.parse(event.data);
-        if (parsedLiveMessage?.data) {
-          setRealTimeThreatAlerts(prev => [parsedLiveMessage.data, ...prev]);
+        const data = JSON.parse(event.data);
+        if (data?.user) {
+          const newLog = {
+            user: { username: data.user },
+            activity_type: '⚠️ Suspicious Activity',
+            timestamp: new Date().toISOString(),
+            is_suspicious: true,
+          };
+          setArrayOfSystemUserLogs(prev => [newLog, ...prev]);
+          setRealTimeThreatAlerts(prev => [data, ...prev]);
         }
-      } catch (e) {
-        console.error('Invalid WebSocket message:', e);
+      } catch (err) {
+        console.error('WebSocket message error:', err);
       }
     };
 
-    websocketConnectionForLiveThreats.onerror = (err) => {
-      console.warn('WebSocket connection error:', err.message);
-    };
-
-    return () => {
-      websocketConnectionForLiveThreats.close();
-    };
+    socket.onerror = err => console.warn('WebSocket error:', err);
+    return () => socket.close();
   }, []);
 
-  const numberOfDetectedAnomalies = arrayOfSystemUserLogs.filter(log => log.is_suspicious).length;
-
-  // Chart Data Preparation
-  const logsOverTimeLabels = arrayOfSystemUserLogs.slice(0, 7).map(log => new Date(log.timestamp).toLocaleDateString());
-  const logsOverTimeData = arrayOfSystemUserLogs.slice(0, 7).map((_, i) => i + 1);
-  <DashboardCharts />
-
+  const totalLogs = arrayOfSystemUserLogs.length;
+  const suspiciousLogs = arrayOfSystemUserLogs.filter(log => log.is_suspicious).length;
   const pieData = {
     labels: ['Suspicious Logs', 'Normal Logs'],
     datasets: [{
-      data: [
-        arrayOfSystemUserLogs.filter(log => log.is_suspicious).length,
-        arrayOfSystemUserLogs.filter(log => !log.is_suspicious).length
-      ],
+      data: [suspiciousLogs, totalLogs - suspiciousLogs],
       backgroundColor: ['#f87171', '#34d399']
     }]
   };
-
-  const topSuspiciousUsers = Object.entries(
-    arrayOfSystemUserLogs.filter(log => log.is_suspicious).reduce((acc, log) => {
-      const name = log.user?.username || 'Unknown';
+  const topUsers = Object.entries(
+    arrayOfSystemUserLogs.filter(l => l.is_suspicious).reduce((acc, l) => {
+      const name = l.user?.username || 'Unknown';
       acc[name] = (acc[name] || 0) + 1;
       return acc;
     }, {})
   ).sort((a, b) => b[1] - a[1]).slice(0, 5);
 
   const barData = {
-    labels: topSuspiciousUsers.map(([user]) => user),
-    datasets: [{
-      label: 'Suspicious Logs',
-      data: topSuspiciousUsers.map(([_, count]) => count),
-      backgroundColor: '#facc15'
-    }]
+    labels: topUsers.map(([u]) => u),
+    datasets: [{ label: 'Suspicious Logs', data: topUsers.map(([_, c]) => c), backgroundColor: '#facc15' }]
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-tr from-gray-50 via-indigo-100 to-blue-200 p-6 font-sans">
-      {/* Top Navigation */}
+    <div className="min-h-screen bg-gray-100 p-6 font-sans">
       <div className="bg-indigo-900 text-white p-4 rounded-lg shadow-lg flex justify-between items-center mb-8">
         <h1 className="text-3xl font-extrabold tracking-wide">🧠 Insider Threat Monitor</h1>
         <div className="flex gap-3">
@@ -141,7 +99,6 @@ function RealTimeInsiderThreatDashboardComponent({ setAuth }) {
         </div>
       </div>
 
-      {/* Real-Time Alerts Display */}
       {realTimeThreatAlerts.length > 0 && (
         <div className="bg-red-50 border-l-8 border-red-500 p-4 mb-6 rounded-xl shadow animate-pulse">
           <h2 className="text-lg font-semibold text-red-800 mb-2">⚠️ Real-Time Threat Alert</h2>
@@ -153,74 +110,32 @@ function RealTimeInsiderThreatDashboardComponent({ setAuth }) {
         </div>
       )}
 
-      {/* Quick Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-        <StatCard label="📋 Total Logs" value={arrayOfSystemUserLogs.length} color="blue" />
-        <StatCard label="🛑 Flagged Users" value={numberOfDetectedAnomalies} color="yellow" />
+        <StatCard label="📋 Total Logs" value={totalLogs} color="blue" />
+        <StatCard label="🛑 Flagged Users" value={suspiciousLogs} color="yellow" />
         <StatCard label="🚨 Active Alerts" value={numberOfOpenAlerts} color="red" />
       </div>
 
-      {/* Graphs Section */}
       <DashboardCharts
-        labels={logsOverTimeLabels}
-        data={logsOverTimeData}
+        labels={hourLabels}
+        data={hourScores}
         pieData={pieData}
         barData={barData}
       />
-
-      {/*<div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-10">*/}
-      {/*  <div className="bg-white rounded-xl p-4 shadow-md border">*/}
-      {/*    <h3 className="font-semibold text-center mb-2">📈 Logs Over Time</h3>*/}
-      {/*    <Line data={{ labels: logsOverTimeLabels, datasets: [{ label: 'Logs', data: logsOverTimeData, borderColor: '#3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.3)', tension: 0.3 }] }} options={{ responsive: true }} />*/}
-      {/*  </div>*/}
-      {/*  <div className="bg-white rounded-xl p-4 shadow-md border">*/}
-      {/*    <h3 className="font-semibold text-center mb-2">🥧 Threat Breakdown</h3>*/}
-      {/*    <Pie data={pieData} options={{ responsive: true }} />*/}
-      {/*  </div>*/}
-      {/*  <div className="bg-white rounded-xl p-4 shadow-md border">*/}
-      {/*    <h3 className="font-semibold text-center mb-2">📊 Top Flagged Users</h3>*/}
-      {/*    <Bar data={barData} options={{ responsive: true, indexAxis: 'y' }} />*/}
-      {/*  </div>*/}
-      {/*</div>*/}
-
-      {/* Main Log Display */}
-      <div className="bg-white p-6 rounded-xl shadow-2xl border border-blue-100">
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-xl font-bold text-gray-800">🧾 Most Recent Logs</h2>
-          <button onClick={fetchLogsAndAlertsFromServer} disabled={dashboardLoadingState} className={`px-5 py-2 rounded-md text-white font-semibold shadow ${dashboardLoadingState ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}>{dashboardLoadingState ? 'Refreshing...' : '🔄 Refresh'}</button>
-        </div>
-
-        {errorMessageOnDashboard && <div className="bg-red-100 text-red-700 p-3 rounded mb-4">{errorMessageOnDashboard}</div>}
-
-        {arrayOfSystemUserLogs.length === 0 && !dashboardLoadingState ? (
-          <p className="text-center text-gray-500">No logs have been uploaded yet.</p>
-        ) : (
-          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            {arrayOfSystemUserLogs.slice(0, 6).map((logEntry, idx) => (
-              <div key={idx} className="bg-gradient-to-br from-white to-gray-50 p-5 rounded-xl border shadow">
-                <div className="text-gray-700 font-medium">👤 <strong>User:</strong> {logEntry.user?.username || 'Unknown'}</div>
-                <div className="text-gray-700">📌 <strong>Action:</strong> {logEntry.activity_type}</div>
-                <div className="text-gray-600 text-sm">🕓 <strong>Time:</strong> {new Date(logEntry.timestamp).toLocaleString()}</div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
     </div>
   );
 }
 
 function StatCard({ label, value, color }) {
-  const colorClasses = {
+  const colors = {
     blue: 'text-blue-700',
     yellow: 'text-yellow-600',
     red: 'text-red-600',
   };
-
   return (
     <div className="bg-white p-4 rounded-lg shadow border text-center">
       <h3 className="text-gray-700 font-bold text-lg">{label}</h3>
-      <p className={`text-3xl ${colorClasses[color]}`}>{value}</p>
+      <p className={`text-3xl ${colors[color]}`}>{value}</p>
     </div>
   );
 }

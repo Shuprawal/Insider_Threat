@@ -1,3 +1,5 @@
+from django.db.models import Count, Avg
+from django.db.models.functions import ExtractHour
 from django.views.decorators.csrf import csrf_exempt
 from django.http import JsonResponse
 from .models import CustomUser, ActivityLogs, Alerts
@@ -24,144 +26,245 @@ from ThreatDetection.auth_utils import *
 from django.shortcuts import render
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
-
-
+from .models import ActivityLogs, Alerts, CustomUser
+from channels.layers import get_channel_layer
+from asgiref.sync import async_to_sync
+from io import TextIOWrapper
+import pandas as pd
+import joblib
+from django.utils.timezone import now, localtime
 
 SESSION_STORE = {}
 
+
+from django.http import JsonResponse
+
+from django.views.decorators.csrf import csrf_exempt
+from django.http import JsonResponse
+from django.utils import timezone
+from datetime import datetime
+from io import TextIOWrapper
+import pandas as pd
+
+
+
+# @csrf_exempt
+from django.utils.timezone import make_aware
+from django.utils import timezone
+from datetime import datetime
+from django.http import JsonResponse
+from django.utils.timezone import make_aware
+from channels.layers import get_channel_layer
+from asgiref.sync import async_to_sync
+from .models import CustomUser, ActivityLogs, Alerts
+import pandas as pd
+import joblib
+from io import TextIOWrapper
+
+
 @csrf_exempt
+# def analyze_uploaded_logs(request):
+#     if request.method == 'POST' and request.FILES.get('file'):
+#         file = request.FILES['file']
+#         try:
+#             df = pd.read_csv(file)
+#             anomalies = []
+#
+#             for _, row in df.iterrows():
+#                 timestamp = pd.to_datetime(row['timestamp'], errors='coerce')
+#                 if pd.isna(timestamp):
+#                     continue
+#
+#                 hour = timestamp.hour
+#                 activity = row['activity'].lower()
+#
+#                 # Very basic rule-based detection
+#                 if activity in ['usb_inserted', 'file_accessed'] and (hour >= 0 and hour <= 5):
+#                     anomalies.append({
+#                         "user": row['user'],
+#                         "activity": row['activity'],
+#                         "timestamp": row['timestamp'],
+#                         "confidence": 75,  # Dummy confidence score
+#                         "score": 0.85      # Dummy model score
+#                     })
+#
+#             return JsonResponse({"anomalies": anomalies})
+#         except Exception as e:
+#             return JsonResponse({"error": str(e)}, status=500)
+#
+#     return JsonResponse({"error": "Invalid request"}, status=400)
+
 def analyze_uploaded_logs(request):
+    print("Analyzing uploaded logs")
+
     if request.method == 'POST' and request.FILES.get('file'):
         try:
-            hybrid_model_bundle_loaded_from_disk = joblib.load('ai_model/hybrid_threat_model.pkl')
-            isolation_forest_model_used_for_scoring = hybrid_model_bundle_loaded_from_disk['isolation_model']
-            random_forest_model_used_for_labeling = hybrid_model_bundle_loaded_from_disk['random_forest_model']
-            feature_scaler_for_uploaded_logs = hybrid_model_bundle_loaded_from_disk['scaler']
-            expected_input_feature_columns_list = hybrid_model_bundle_loaded_from_disk['features']
-
+            hybrid_model_bundle = joblib.load('ai_model/final_hybrid_threat_model_daily.pkl')
+            scaler = hybrid_model_bundle['scaling_module']
+            isolation_model = hybrid_model_bundle['iforest_module']
+            random_forest_model = hybrid_model_bundle['random_forest_module']
+            expected_features = hybrid_model_bundle['training_input_features']
         except FileNotFoundError:
-            return JsonResponse({'error': 'Trained hybrid model file not found in ai_model directory.'}, status=500)
+            return JsonResponse({'error': 'Model file not found.'}, status=500)
 
         try:
-            user_uploaded_log_file_object = request.FILES['file']
-            uploaded_dataframe_raw_logs = pd.read_csv(
-                TextIOWrapper(user_uploaded_log_file_object.file, encoding='utf-8'),
-                on_bad_lines='skip'
-            )
+            df = pd.read_csv(TextIOWrapper(request.FILES['file'].file, encoding='utf-8'), on_bad_lines='skip')
+            df.columns = [col.strip().lower() for col in df.columns]
 
-            uploaded_dataframe_raw_logs.columns = [col.strip().lower() for col in uploaded_dataframe_raw_logs.columns]
+            if 'user' not in df.columns:
+                df['user'] = df['from'] if 'from' in df.columns else 'unknown'
+            if 'activity' not in df.columns:
+                df['activity'] = 'Unknown'
+            if 'date' not in df.columns and 'timestamp' in df.columns:
+                df['date'] = df['timestamp']
 
-            if 'user' not in uploaded_dataframe_raw_logs.columns:
-                uploaded_dataframe_raw_logs['user'] = uploaded_dataframe_raw_logs['from'] if 'from' in uploaded_dataframe_raw_logs.columns else 'unknown'
+            df['timestamp'] = pd.to_datetime(df['date'], errors='coerce')
+            df = df.dropna(subset=['timestamp'])
+            df['timestamp'] = df['timestamp'].apply(lambda ts: make_aware(ts) if ts.tzinfo is None else ts)
 
-            if 'activity' not in uploaded_dataframe_raw_logs.columns:
-                uploaded_dataframe_raw_logs['activity'] = 'Unknown'
+            if df.empty:
+                return JsonResponse({'anomalies': [], 'total_anomalies': 0, 'info': '⚠️ No usable timestamps found.'})
 
-            if 'date' not in uploaded_dataframe_raw_logs.columns and 'timestamp' in uploaded_dataframe_raw_logs.columns:
-                uploaded_dataframe_raw_logs['date'] = uploaded_dataframe_raw_logs['timestamp']
+            df['day'] = df['timestamp'].dt.date.astype(str)
+            df['hour'] = df['timestamp'].dt.hour
 
-            uploaded_dataframe_raw_logs['timestamp'] = pd.to_datetime(uploaded_dataframe_raw_logs['date'], errors='coerce')
-            uploaded_dataframe_raw_logs = uploaded_dataframe_raw_logs.dropna(subset=['timestamp'])
+            df_email = df[df['activity'].str.contains('email', case=False)]
+            df_file = df[df['activity'].str.contains('file', case=False)]
+            df_logon = df[df['activity'].str.contains('logon|login', case=False)]
+            df_usb = df[df['activity'].str.contains('usb|device', case=False)]
 
-            if uploaded_dataframe_raw_logs.empty:
-                return JsonResponse({
-                    'anomalies': [],
-                    'total_anomalies': 0,
-                    'total_alerts': 0,
-                    'info': 'Uploaded file did not contain any valid rows with usable timestamps.'
-                })
+            df_email_agg = df_email.groupby(['user', 'day']).size().reset_index(name='total_emails_sent')
+            df_file_agg = df_file.groupby(['user', 'day']).size().reset_index(name='total_files_accessed')
+            df_logon_agg = df_logon.groupby(['user', 'day']).size().reset_index(name='total_logon_sessions')
+            df_usb_agg = df_usb.groupby(['user', 'day']).size().reset_index(name='total_usb_activities')
 
-            uploaded_dataframe_raw_logs['hour'] = uploaded_dataframe_raw_logs['timestamp'].dt.hour
-            uploaded_dataframe_raw_logs['day'] = uploaded_dataframe_raw_logs['timestamp'].dt.dayofweek
-            uploaded_dataframe_raw_logs['activity_code'] = uploaded_dataframe_raw_logs['activity'].astype('category').cat.codes
-            uploaded_dataframe_raw_logs['user_code'] = uploaded_dataframe_raw_logs['user'].astype('category').cat.codes
+            df_features = df_email_agg.merge(df_file_agg, on=['user', 'day'], how='outer') \
+                .merge(df_logon_agg, on=['user', 'day'], how='outer') \
+                .merge(df_usb_agg, on=['user', 'day'], how='outer')
+            df_features.fillna(0, inplace=True)
 
-            extracted_features_for_model_input = uploaded_dataframe_raw_logs[expected_input_feature_columns_list].fillna(0)
-            scaled_feature_matrix_for_prediction = feature_scaler_for_uploaded_logs.transform(extracted_features_for_model_input)
+            night_email_agg = df_email[df_email['hour'].between(0, 6)].groupby(['user', 'day']).size().reset_index(name='nighttime_email_events')
+            night_logon_agg = df_logon[df_logon['hour'].between(0, 6)].groupby(['user', 'day']).size().reset_index(name='number_of_night_logons')
 
-            uploaded_dataframe_raw_logs['isolation_score'] = isolation_forest_model_used_for_scoring.decision_function(scaled_feature_matrix_for_prediction)
-            uploaded_dataframe_raw_logs['rf_prediction'] = random_forest_model_used_for_labeling.predict(scaled_feature_matrix_for_prediction)
-            uploaded_dataframe_raw_logs['is_anomaly'] = uploaded_dataframe_raw_logs['rf_prediction'] == 1
+            df_features = df_features.merge(night_email_agg, on=['user', 'day'], how='left') \
+                .merge(night_logon_agg, on=['user', 'day'], how='left')
+            df_features[['nighttime_email_events', 'number_of_night_logons']] = df_features[
+                ['nighttime_email_events', 'number_of_night_logons']].fillna(0)
 
-            final_dataframe_only_anomalies = uploaded_dataframe_raw_logs[uploaded_dataframe_raw_logs['is_anomaly'] == True]
-            alert_entries_created_for_anomalies = []
+            df_features['day_of_week'] = pd.to_datetime(df_features['day']).dt.dayofweek
+            df_features['is_weekend'] = df_features['day_of_week'].isin([5, 6]).astype(int)
 
-            if final_dataframe_only_anomalies.empty:
-                return JsonResponse({
-                    'anomalies': [],
-                    'total_anomalies': 0,
-                    'total_alerts': 0,
-                    'info': '✅ No suspicious user activity patterns found in uploaded logs.'
-                })
+            df_features.sort_values(['user', 'day'], inplace=True)
+            df_features['email_diff_1d'] = df_features.groupby('user')['total_emails_sent'].diff().fillna(0)
+            df_features['logon_diff_1d'] = df_features.groupby('user')['total_logon_sessions'].diff().fillna(0)
+            df_features['logon_rolling_7d_avg'] = df_features.groupby('user')['total_logon_sessions'].transform(lambda x: x.rolling(7, min_periods=1).mean())
+            df_features['logon_to_email_ratio'] = df_features['total_logon_sessions'] / (df_features['total_emails_sent'] + 1)
 
-            for _, suspicious_row in final_dataframe_only_anomalies.iterrows():
-                fallback_selected_user_instance = CustomUser.objects.first()
-                new_log_instance_flagged_as_suspicious = ActivityLogs.objects.create(
-                    user=fallback_selected_user_instance,
-                    activity_type=suspicious_row['activity'],
+            df_features.rename(columns={
+                'total_emails_sent': 'number_of_emails_dispatched',
+                'total_files_accessed': 'number_of_files_interacted',
+                'total_logon_sessions': 'total_logon_attempts',
+                'total_usb_activities': 'usb_connection_incidents',
+                'email_diff_1d': 'email_volume_change_1d',
+                'logon_diff_1d': 'logon_variation_1d',
+                'logon_rolling_7d_avg': 'logon_rolling_average_7d',
+                'logon_to_email_ratio': 'logon_to_email_event_ratio',
+                'day_of_week': 'weekday_index',
+                'is_weekend': 'is_weekend_day'
+            }, inplace=True)
+
+            for trait in [
+                'trait_openness_score', 'trait_conscientiousness_score', 'trait_extraversion_score',
+                'trait_agreeableness_score', 'trait_neuroticism_score'
+            ]:
+                df_features[trait] = 0
+
+            model_input_df = df_features[expected_features].fillna(0)
+            model_input_scaled = scaler.transform(model_input_df)
+
+            df_features['isolation_score'] = isolation_model.decision_function(model_input_scaled)
+            df_features['rf_prediction'] = random_forest_model.predict(model_input_df)
+            df_features['rf_confidence'] = random_forest_model.predict_proba(model_input_df)[:, 1]
+            df_features['is_anomaly'] = df_features['rf_prediction'] == 1
+
+            df_combined = df_features.merge(df[['user', 'timestamp', 'activity']], on='user', how='left')
+            alerts_created = []
+
+            for _, row in df_combined.iterrows():
+                default_user = CustomUser.objects.first()
+                log = ActivityLogs.objects.create(
+                    user=default_user,
+                    activity_type=row['activity'],
                     resource_accessed='',
-                    action_result='Flagged as suspicious',
-                    timestamp=suspicious_row['timestamp'],
-                    is_suspicious=True,
-                    details=f"⚠️ Suspicious activity auto-detected in uploaded logs (user: {suspicious_row['user']})"
+                    action_result='Flagged as suspicious' if row['is_anomaly'] else 'Normal',
+                    timestamp=row['timestamp'],
+                    is_suspicious=bool(row['is_anomaly']),
+                    details=f"Auto-processed: {row['activity']}"
                 )
-                newly_generated_alert_entry = Alerts.objects.create(
-                    log=new_log_instance_flagged_as_suspicious,
-                    score=round(abs(suspicious_row['isolation_score']), 4),
-                    status='open'
-                )
-                alert_entries_created_for_anomalies.append({
-                    'id': newly_generated_alert_entry.id,
-                    'score': newly_generated_alert_entry.score,
-                    'status': newly_generated_alert_entry.status,
-                    'created_at': newly_generated_alert_entry.created_at,
-                })
 
-                # Broadcast WebSocket notification
-                channel_layer = get_channel_layer()
-                async_to_sync(channel_layer.group_send)(
-                    "threats",
-                    {
-                        "type": "send_threat_alert",
-                        "data": {
-                            "message": "🚨 New insider threat detected!",
-                            "user": suspicious_row['user'],
-                            "score": round(abs(suspicious_row['isolation_score']), 4),
-                            "timestamp": str(suspicious_row['timestamp']),
-                            "activity": suspicious_row['activity']
+                if row['is_anomaly']:
+                    alert = Alerts.objects.create(
+                        log=log,
+                        score=round(abs(row['isolation_score']), 4),
+                        status='open'
+                    )
+                    alerts_created.append({
+                        'id': alert.id,
+                        'user': row['user'],
+                        'activity': row['activity'],
+                        'timestamp': str(row['timestamp']),
+                        'score': round(abs(row['isolation_score']), 4),
+                        'confidence': round(row['rf_confidence'] * 100, 2),
+                        'status': alert.status,
+                        'created_at': alert.created_at,
+                    })
+
+                    channel_layer = get_channel_layer()
+                    async_to_sync(channel_layer.group_send)(
+                        "threats",
+                        {
+                            "type": "send_threat_alert",
+                            "data": {
+                                "message": "\ud83d\udea8 Insider threat detected",
+                                "user": row['user'],
+                                "activity": row['activity'],
+                                "score": round(abs(row['isolation_score']), 4),
+                                "confidence": round(row['rf_confidence'] * 100, 2),
+                                "timestamp": str(row['timestamp'])
+                            }
                         }
-                    }
-                )
+                    )
 
             return JsonResponse({
-                'anomalies': final_dataframe_only_anomalies[['user', 'activity', 'date']].to_dict(orient='records'),
-                'total_anomalies': len(final_dataframe_only_anomalies),
-                'total_alerts': len(alert_entries_created_for_anomalies),
-                'alerts_created': alert_entries_created_for_anomalies
+                'anomalies': alerts_created,
+                'total_anomalies': len(alerts_created),
+                'total_logged_activities': len(df_combined)
             })
 
-        except Exception as unexpected_exception_instance:
-            return JsonResponse({'error': str(unexpected_exception_instance)}, status=500)
+        except Exception as e:
+            return JsonResponse({'error': str(e)}, status=500)
 
-    return JsonResponse({'error': 'Please submit a POST request with a valid CSV log file as "file".'}, status=400)
+    return JsonResponse({'error': 'Submit a POST request with a CSV file under "file".'}, status=400)
 
 
 # def analyze_uploaded_logs(request):
+#     print("Analyzing uploaded logs")
+#
 #     if request.method == 'POST' and request.FILES.get('file'):
 #         try:
-#             model_data = joblib.load('ai_model/hybrid_threat_model.pkl')
-#             isolation_model = model_data['isolation_model']
-#             random_model = model_data['random_forest_model']
-#             scaler = model_data['scaler']
-#             features = model_data['features']
-#
+#             # Load trained hybrid model
+#             hybrid_model_bundle = joblib.load('ai_model/final_hybrid_threat_model_daily.pkl')
+#             scaler = hybrid_model_bundle['scaling_module']
+#             isolation_model = hybrid_model_bundle['iforest_module']
+#             random_forest_model = hybrid_model_bundle['random_forest_module']
+#             expected_features = hybrid_model_bundle['training_input_features']
 #         except FileNotFoundError:
-#             return JsonResponse({'error': 'Model file not found'}, status=500)
+#             return JsonResponse({'error': 'Model file not found.'}, status=500)
 #
 #         try:
-#             uploaded_file = request.FILES['file']
-#             df = pd.read_csv(TextIOWrapper(uploaded_file.file, encoding='utf-8'), on_bad_lines='skip')
-#             df.columns = [c.strip().lower() for c in df.columns]
+#             # Read uploaded CSV
+#             df = pd.read_csv(TextIOWrapper(request.FILES['file'].file, encoding='utf-8'), on_bad_lines='skip')
+#             df.columns = [col.strip().lower() for col in df.columns]
 #
 #             if 'user' not in df.columns:
 #                 df['user'] = df['from'] if 'from' in df.columns else 'unknown'
@@ -171,82 +274,140 @@ def analyze_uploaded_logs(request):
 #                 df['date'] = df['timestamp']
 #
 #             df['timestamp'] = pd.to_datetime(df['date'], errors='coerce')
+#
+#             # Convert to timezone-aware datetimes
+#             df['timestamp'] = df['timestamp'].apply(lambda ts: make_aware(ts) if ts.tzinfo is None else ts)
+#
 #             df = df.dropna(subset=['timestamp'])
 #
 #             if df.empty:
-#                 return JsonResponse({'anomalies': [], 'total_anomalies': 0, 'total_alerts': 0, 'info': 'No valid logs found in file.'})
+#                 return JsonResponse({'anomalies': [], 'total_anomalies': 0, 'info': '⚠️ No usable timestamps found.'})
 #
+#             df['day'] = df['timestamp'].dt.date.astype(str)
 #             df['hour'] = df['timestamp'].dt.hour
-#             df['day'] = df['timestamp'].dt.dayofweek
-#             df['activity_code'] = df['activity'].astype('category').cat.codes
-#             df['user_code'] = df['user'].astype('category').cat.codes
 #
-#             features = df[['hour', 'day', 'activity_code', 'user_code']].fillna(0)
-#             X_scaled = scaler.transform(features)
-#             df['is_anomaly'] = model.predict(X_scaled) == -1
-#             df['score'] = model.decision_function(X_scaled)
+#             # Filter by activity
+#             df_email = df[df['activity'].str.contains('email', case=False)]
+#             df_file = df[df['activity'].str.contains('file', case=False)]
+#             df_logon = df[df['activity'].str.contains('logon|login', case=False)]
+#             df_usb = df[df['activity'].str.contains('usb|device', case=False)]
 #
-#             anomalies = df[df['is_anomaly']]
-#             created_alerts = []
+#             df_email_agg = df_email.groupby(['user', 'day']).size().reset_index(name='total_emails_sent')
+#             df_file_agg = df_file.groupby(['user', 'day']).size().reset_index(name='total_files_accessed')
+#             df_logon_agg = df_logon.groupby(['user', 'day']).size().reset_index(name='total_logon_sessions')
+#             df_usb_agg = df_usb.groupby(['user', 'day']).size().reset_index(name='total_usb_activities')
 #
-#             if anomalies.empty:
-#                 return JsonResponse({
-#                     'anomalies': [],
-#                     'total_anomalies': 0,
-#                     'total_alerts': 0,
-#                     'info': 'No suspicious activity detected.'
-#                 })
+#             df_features = df_email_agg.merge(df_file_agg, on=['user', 'day'], how='outer') \
+#                 .merge(df_logon_agg, on=['user', 'day'], how='outer') \
+#                 .merge(df_usb_agg, on=['user', 'day'], how='outer')
+#             df_features.fillna(0, inplace=True)
 #
-#             for _, row in anomalies.iterrows():
-#                 user_instance = CustomUser.objects.first()  # fallback for demo
+#             night_email_agg = df_email[df_email['hour'].between(0, 6)].groupby(['user', 'day']).size().reset_index(name='nighttime_email_events')
+#             night_logon_agg = df_logon[df_logon['hour'].between(0, 6)].groupby(['user', 'day']).size().reset_index(name='number_of_night_logons')
+#
+#             df_features = df_features.merge(night_email_agg, on=['user', 'day'], how='left') \
+#                                      .merge(night_logon_agg, on=['user', 'day'], how='left')
+#             df_features[['nighttime_email_events', 'number_of_night_logons']] = df_features[['nighttime_email_events', 'number_of_night_logons']].fillna(0)
+#
+#             df_features['day_of_week'] = pd.to_datetime(df_features['day']).dt.dayofweek
+#             df_features['is_weekend'] = df_features['day_of_week'].isin([5, 6]).astype(int)
+#
+#             df_features.sort_values(['user', 'day'], inplace=True)
+#             df_features['email_diff_1d'] = df_features.groupby('user')['total_emails_sent'].diff().fillna(0)
+#             df_features['logon_diff_1d'] = df_features.groupby('user')['total_logon_sessions'].diff().fillna(0)
+#             df_features['logon_rolling_7d_avg'] = df_features.groupby('user')['total_logon_sessions'].transform(lambda x: x.rolling(7, min_periods=1).mean())
+#             df_features['logon_to_email_ratio'] = df_features['total_logon_sessions'] / (df_features['total_emails_sent'] + 1)
+#
+#             df_features.rename(columns={
+#                 'total_emails_sent': 'number_of_emails_dispatched',
+#                 'total_files_accessed': 'number_of_files_interacted',
+#                 'total_logon_sessions': 'total_logon_attempts',
+#                 'total_usb_activities': 'usb_connection_incidents',
+#                 'email_diff_1d': 'email_volume_change_1d',
+#                 'logon_diff_1d': 'logon_variation_1d',
+#                 'logon_rolling_7d_avg': 'logon_rolling_average_7d',
+#                 'logon_to_email_ratio': 'logon_to_email_event_ratio',
+#                 'day_of_week': 'weekday_index',
+#                 'is_weekend': 'is_weekend_day'
+#             }, inplace=True)
+#
+#             for trait in [
+#                 'trait_openness_score', 'trait_conscientiousness_score', 'trait_extraversion_score',
+#                 'trait_agreeableness_score', 'trait_neuroticism_score'
+#             ]:
+#                 df_features[trait] = 0
+#
+#             model_input_df = df_features[expected_features].fillna(0)
+#             model_input_scaled = scaler.transform(model_input_df)
+#
+#             df_features['isolation_score'] = isolation_model.decision_function(model_input_scaled)
+#             df_features['rf_prediction'] = random_forest_model.predict(model_input_df)
+#             df_features['rf_confidence'] = random_forest_model.predict_proba(model_input_df)[:, 1]
+#             df_features['is_anomaly'] = df_features['rf_prediction'] == 1
+#
+#             df_combined = df_features.merge(df[['user', 'timestamp', 'activity']], on='user', how='left')
+#             alerts_created = []
+#
+#             for _, row in df_combined.iterrows():
+#                 default_user = CustomUser.objects.first()
+#
 #                 log = ActivityLogs.objects.create(
-#                     user=user_instance,
+#                     user=default_user,
 #                     activity_type=row['activity'],
 #                     resource_accessed='',
-#                     action_result='Flagged as suspicious',
+#                     action_result='Flagged as suspicious' if row['is_anomaly'] else 'Normal',
 #                     timestamp=row['timestamp'],
-#                     is_suspicious=True,
-#                     details=f"Auto-detected anomaly from uploaded log (user: {row['user']})"
+#                     is_suspicious=bool(row['is_anomaly']),
+#                     details=f"Auto-processed: {row['activity']}"
 #                 )
-#                 alert = Alerts.objects.create(
-#                     log=log,
-#                     score=round(abs(row['score']), 4),
-#                     status='open'
-#                 )
-#                 created_alerts.append({
-#                     'id': alert.id,
-#                     'score': alert.score,
-#                     'status': alert.status,
-#                     'created_at': alert.created_at,
-#                 })
+#
+#                 if row['is_anomaly']:
+#                     alert = Alerts.objects.create(
+#                         log=log,
+#                         score=round(abs(row['isolation_score']), 4),
+#                         status='open'
+#                     )
+#                     alerts_created.append({
+#                         'id': alert.id,
+#                         'user': row['user'],
+#                         'activity': row['activity'],
+#                         'timestamp': str(row['timestamp']),
+#                         'score': round(abs(row['isolation_score']), 4),
+#                         'confidence': round(row['rf_confidence'] * 100, 2),
+#                         'status': alert.status,
+#                         'created_at': alert.created_at,
+#                     })
+#
+#                     # WebSocket alert
+#                     channel_layer = get_channel_layer()
+#                     async_to_sync(channel_layer.group_send)(
+#                         "threats",
+#                         {
+#                             "type": "send_threat_alert",
+#                             "data": {
+#                                 "message": "🚨 Insider threat detected",
+#                                 "user": row['user'],
+#                                 "activity": row['activity'],
+#                                 "score": round(abs(row['isolation_score']), 4),
+#                                 "confidence": round(row['rf_confidence'] * 100, 2),
+#                                 "timestamp": str(row['timestamp'])
+#                             }
+#                         }
+#                     )
 #
 #             return JsonResponse({
-#                 'anomalies': anomalies[['user', 'activity', 'date']].to_dict(orient='records'),
-#                 'total_anomalies': len(anomalies),
-#                 'total_alerts': len(created_alerts),
-#                 'alerts_created': created_alerts
+#                 'anomalies': alerts_created,
+#                 'total_anomalies': len(alerts_created),
+#                 'total_logged_activities': len(df_combined)
 #             })
 #
 #         except Exception as e:
 #             return JsonResponse({'error': str(e)}, status=500)
 #
-#     return JsonResponse({'error': 'POST a log file as "file"'}, status=400)
-#
+#     return JsonResponse({'error': 'Submit a POST request with a CSV file under "file".'}, status=400)
 
 
 
-# def get_authenticated_user(request):
-#     auth_header = request.headers.get('Authorization', '')
-#     print("🔐 Authorization Header:", auth_header)
-#     token = auth_header.replace('Bearer ', '')
-#     print("🔑 Token extracted:", token)
-#     user_id = SESSION_STORE.get(token)
-#     print("🧠 Matched user ID:", user_id)
-#     if not user_id:
-#         return None
-#     return CustomUser.objects.filter(id=user_id).first()
-
-from django.http import JsonResponse
 from ThreatDetection.models import Alerts, CustomUser
 import jwt
 from django.conf import settings
@@ -384,7 +545,6 @@ def custom_register(request):
     return JsonResponse({'error': 'Only POST allowed'}, status=405)
 
 
-#  Create Activity Log Entry
 
 @csrf_exempt
 def custom_log_create(request):
@@ -451,7 +611,6 @@ def custom_log_list(request):
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from rest_framework.authentication import BasicAuthentication  # fallback
 from ThreatDetection.authentication import CustomTokenAuthentication
 
 
@@ -492,33 +651,11 @@ def alerts_list(request):
         return JsonResponse(data, safe=False)
 
     return JsonResponse({'error': 'Method not allowed'}, status=405)
-# def alerts_list(request):
-#     auth_user = get_authenticated_user(request)
-#     if not auth_user or auth_user.role != 'admin':
-#         return JsonResponse({'error': 'Unauthorized'}, status=401)
-#
-#     if request.method == 'GET':
-#         alerts = Alerts.objects.select_related('log').order_by('-created_at')
-#         data = [
-#             {
-#                 'id': alert.id,
-#                 'score': alert.score,
-#                 'status': alert.status,
-#                 'created_at': alert.created_at,
-#                 'user': alert.log.user.username if alert.log and alert.log.user else 'Unknown',
-#                 'notes': alert.notes,
-#             }
-#             for alert in alerts
-#         ]
-#         return JsonResponse(data, safe=False)
-#
-#     return JsonResponse({'error': 'Only GET allowed'}, status=405)
-
-
 
 
 @csrf_exempt
 def hybrid_user_level_threat_detection(request):
+    print("hybrid_user_level_threat_detection")
     if request.method != 'GET':
         return JsonResponse({'error': 'Only GET allowed'}, status=405)
 
@@ -528,7 +665,8 @@ def hybrid_user_level_threat_detection(request):
         from sklearn.preprocessing import StandardScaler
 
         # Load hybrid model
-        model_data = joblib.load('ai_model/hybrid_threat_model.pkl')
+        # model_data = joblib.load('ai_trained_model/hybrid_threat_model.pkl')
+        model_data = joblib.load('ai_model/final_hybrid_threat_model_daily.pkl')
         scaler = model_data['scaler']
         isolation_model = model_data['isolation_model']
         random_model = model_data['random_forest_model']
@@ -589,11 +727,132 @@ def hybrid_user_level_threat_detection(request):
 
 
 
-from rest_framework.views import APIView
-from rest_framework.response import Response
 
-class AllLogsView(APIView):
-    print('aaa')
-    def get(self, request):
-        print('bbb')
-        return Response({"message": "Logs fetched successfully"})
+
+
+
+
+
+def get_threat_chart_data(request):
+    today = now().date()
+    current_time = now().replace(minute=0, second=0, microsecond=0)
+    start_time = current_time.replace(hour=0)
+
+    # Line Chart — Hourly Threat Confidence Score
+    hourly_scores = (
+        Alerts.objects
+        .filter(log__timestamp__date=today)
+        .annotate(hour=Count('log__timestamp__hour'))
+        .values('log__timestamp__hour')
+        .annotate(avg_score=Avg('score'))
+        .order_by('log__timestamp__hour')
+    )
+
+    all_hours = [f"{h:02}:00" for h in range(24)]
+    hour_score_map = {
+        f"{entry['log__timestamp__hour']:02}:00": round(entry['avg_score'], 2)
+        for entry in hourly_scores
+    }
+    hour_scores = [hour_score_map.get(hour, 0) for hour in all_hours]
+
+    # Pie Chart — Top Suspicious Activities
+    pie_data = (
+        ActivityLogs.objects
+        .filter(is_suspicious=True, timestamp__date=today)
+        .values('activity_type')
+        .annotate(count=Count('id'))
+        .order_by('-count')[:5]
+    )
+    pie_labels = [entry['activity_type'] for entry in pie_data]
+    pie_counts = [entry['count'] for entry in pie_data]
+
+    # Bar Chart — Top Suspicious Users
+    suspicious_users = (
+        ActivityLogs.objects
+        .filter(is_suspicious=True, timestamp__date=today)
+        .values('user__username')
+        .annotate(count=Count('id'))
+        .order_by('-count')[:5]
+    )
+    bar_labels = [entry['user__username'] or 'Unknown' for entry in suspicious_users]
+    bar_counts = [entry['count'] for entry in suspicious_users]
+
+    return JsonResponse({
+        'hourLabels': all_hours,
+        'hourScores': hour_scores,
+        'pieLabels': pie_labels,
+        'pieData': pie_counts,
+        'barLabels': bar_labels,
+        'barCounts': bar_counts,
+    })
+
+#
+#
+# @csrf_exempt
+# def get_threat_chart_data(request):
+#     today = now().date()
+#     one_week_ago = today - timedelta(days=6)
+#     current_hour = now().hour
+#
+#     # Line Chart: Weekly avg confidence score
+#     hourly_scores = (
+#         Alerts.objects
+#         .filter(log__timestamp__date=today)
+#         .values(hour=ExtractHour('log__timestamp'))  # Extract hour from timestamp
+#         .annotate(avg_score=Avg('score'))
+#         .order_by('hour')
+#     )
+#
+#     hourly_labels = [f"{h:02d}:00" for h in range(0, current_hour + 1)]
+#     hourly_scores_map = {entry['hour']: round(entry['avg_score'], 2) for entry in hourly_scores}
+#
+#     hourly_data = [hourly_scores_map.get(h, 0) for h in range(0, current_hour + 1)]
+#
+#     # Bar Chart: Count of threats per day
+#     daily_threats = (
+#         ActivityLogs.objects
+#         .filter(is_suspicious=True, timestamp__date__gte=one_week_ago)
+#         .values('timestamp__date')
+#         .annotate(threat_count=Count('id'))
+#         .order_by('timestamp__date')
+#     )
+#
+#     bar_dates = [str(entry['timestamp__date']) for entry in daily_threats]
+#     bar_counts = [entry['threat_count'] for entry in daily_threats]
+#
+#     # Pie Chart: Top activities
+#     pie_data = (
+#         ActivityLogs.objects
+#         .filter(is_suspicious=True)
+#         .values('activity_type')
+#         .annotate(count=Count('id'))
+#         .order_by('-count')[:5]
+#     )
+#     pie_labels = [entry['activity_type'] for entry in pie_data]
+#     pie_counts = [entry['count'] for entry in pie_data]
+#
+#     return JsonResponse({
+#         'hourLabels': hourly_labels,
+#         'hourScores': hourly_data,
+#         'barDates': bar_dates,
+#         'barCounts': bar_counts,
+#         'pieLabels': pie_labels,
+#         'pieData': pie_counts,
+#     })
+
+@csrf_exempt
+def get_all_logs(request):
+    print('aa')
+    logs = ActivityLogs.objects.select_related('user').order_by('-timestamp')[:50]
+    data = []
+
+    for log in logs:
+        data.append({
+            'user': log.user.username,
+            'activity_type': log.activity_type,
+            'timestamp': localtime(log.timestamp).strftime("%Y-%m-%d %H:%M:%S"),
+            'is_suspicious': log.is_suspicious,
+        })
+        # print(data)
+
+    return JsonResponse({'logs': data})
