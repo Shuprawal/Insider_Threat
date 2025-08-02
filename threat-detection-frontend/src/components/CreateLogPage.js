@@ -1,104 +1,128 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import { useNavigate } from 'react-router-dom';
 
-function LogForm({ fetchLogs }) {
-  const [user, setUser] = useState('');
-  const [activity, setActivity] = useState('');
-  const [activityDate, setActivityDate] = useState('');
-  const [activityTime, setActivityTime] = useState('');
-  const [formData, setFormData] = useState({});
+function CreateLogPage() {
+  const [userId, setUserId] = useState('');
+  const [users, setUsers] = useState([]);
+  const [activityType, setActivityType] = useState('');
+  const [timestamp, setTimestamp] = useState('');
+  const [details, setDetails] = useState('');
+  const [dynamicFields, setDynamicFields] = useState({});
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState(false);
 
-  const users = ['alice', 'bob', 'charlie', 'david', 'eva'];
-  const activities = ['email_sent', 'usb_inserted', 'logon', 'file_accessed'];
+  const navigate = useNavigate();
 
-  const handleChange = (field) => (e) => {
-    setFormData({ ...formData, [field]: e.target.value });
-  };
+  const activityOptions = [
+    'email_sent',
+    'usb_inserted',
+    'logon',
+    'file_accessed',
+  ];
+
+  useEffect(() => {
+    const fetchUsers = async () => {
+      try {
+        const token = localStorage.getItem('custom_token');
+        const res = await axios.get('http://localhost:8000/api/users/', {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        setUsers(res.data); // Assuming response contains list of users excluding admins
+      } catch (err) {
+        setError('❌ Failed to load users');
+        console.error(err);
+      }
+    };
+    fetchUsers();
+  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setError('');
+    setSuccess(false);
 
     try {
       const token = localStorage.getItem('custom_token');
-
-      // Combine date and time into a single ISO datetime string
-      const timestamp = `${activityDate}T${activityTime}:00`;
-
       await axios.post(
         'http://localhost:8000/api/logs/create/',
         {
-          user,
-          activity,
+          user: userId,
+          activity: activityType,
           timestamp,
-          ...formData
+          ...dynamicFields,
+          details,
         },
-        { headers: { Authorization: `Bearer ${token}` } }
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
       );
-
-      // Reset form
-      setUser('');
-      setActivity('');
-      setActivityDate('');
-      setActivityTime('');
-      setFormData({});
-      setError('');
-      fetchLogs();
+      setSuccess(true);
+      setUserId('');
+      setActivityType('');
+      setTimestamp('');
+      setDynamicFields({});
+      setDetails('');
     } catch (err) {
-      setError('❌ Failed to submit log. Please try again.');
+      setError('❌ Failed to create log. Please try again.');
       console.error(err);
     }
   };
 
+  const handleFieldChange = (field) => (e) => {
+    setDynamicFields({ ...dynamicFields, [field]: e.target.value });
+  };
+
   const renderDynamicFields = () => {
-    switch (activity) {
+    switch (activityType) {
       case 'email_sent':
         return (
-          <>
-            <label>📧 Number of Emails Sent:</label>
+          <div>
+            <label className="block font-medium text-gray-700">📧 Number of Emails Sent</label>
             <input
               type="number"
-              value={formData.num_emails || ''}
-              onChange={handleChange('num_emails')}
-              className="block w-full p-2 border border-gray-300 rounded-md"
+              value={dynamicFields.num_emails || ''}
+              onChange={handleFieldChange('num_emails')}
+              className="mt-1 w-full p-2 border border-gray-300 rounded"
             />
-          </>
+          </div>
         );
       case 'usb_inserted':
         return (
-          <>
-            <label>🔌 Number of USB Insertions:</label>
+          <div>
+            <label className="block font-medium text-gray-700">🔌 USB Insertion Count</label>
             <input
               type="number"
-              value={formData.usb_count || ''}
-              onChange={handleChange('usb_count')}
-              className="block w-full p-2 border border-gray-300 rounded-md"
+              value={dynamicFields.usb_count || ''}
+              onChange={handleFieldChange('usb_count')}
+              className="mt-1 w-full p-2 border border-gray-300 rounded"
             />
-          </>
+          </div>
         );
       case 'logon':
         return (
-          <>
-            <label>🔐 Logon Type (e.g., successful/failed):</label>
+          <div>
+            <label className="block font-medium text-gray-700">🔐 Logon Type</label>
             <input
               type="text"
-              value={formData.logon_type || ''}
-              onChange={handleChange('logon_type')}
-              className="block w-full p-2 border border-gray-300 rounded-md"
+              value={dynamicFields.logon_type || ''}
+              onChange={handleFieldChange('logon_type')}
+              className="mt-1 w-full p-2 border border-gray-300 rounded"
+              placeholder="e.g., successful or failed"
             />
-          </>
+          </div>
         );
       case 'file_accessed':
         return (
-          <>
-            <label>📁 Number of Files Accessed:</label>
+          <div>
+            <label className="block font-medium text-gray-700">📁 Number of Files Accessed</label>
             <input
               type="number"
-              value={formData.num_files || ''}
-              onChange={handleChange('num_files')}
-              className="block w-full p-2 border border-gray-300 rounded-md"
+              value={dynamicFields.num_files || ''}
+              onChange={handleFieldChange('num_files')}
+              className="mt-1 w-full p-2 border border-gray-300 rounded"
             />
-          </>
+          </div>
         );
       default:
         return null;
@@ -106,84 +130,100 @@ function LogForm({ fetchLogs }) {
   };
 
   return (
-    <div className="bg-white p-4 rounded-md shadow mb-6">
-      <h3 className="text-lg font-semibold mb-4">🛡️ Log Insider Threat Activity</h3>
-      {error && <p className="text-red-500 mb-4">{error}</p>}
+    <div className="min-h-screen bg-gradient-to-br from-gray-100 to-blue-200 p-6">
+      <div className="bg-white max-w-2xl mx-auto p-8 rounded-xl shadow-lg">
+        <h2 className="text-2xl font-bold mb-6 text-center text-blue-800">🛡️ Log Insider Threat Activity</h2>
 
-      <form onSubmit={handleSubmit} className="space-y-4">
-        {/* User */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700">👤 Select User</label>
-          <select
-            value={user}
-            onChange={(e) => setUser(e.target.value)}
-            className="block w-full p-2 border border-gray-300 rounded-md"
-            required
+        {error && <div className="bg-red-100 text-red-700 p-3 rounded mb-4">{error}</div>}
+        {success && <div className="bg-green-100 text-green-700 p-3 rounded mb-4">✅ Log created successfully!</div>}
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {/* User Dropdown */}
+          <div>
+            <label className="block font-medium text-gray-700">👤 Select User</label>
+            <select
+              value={userId}
+              onChange={(e) => setUserId(e.target.value)}
+              className="mt-1 w-full p-2 border border-gray-300 rounded"
+              required
+            >
+              <option value="">-- Choose user --</option>
+              {users.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.username}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Activity Dropdown */}
+          <div>
+            <label className="block font-medium text-gray-700">⚙️ Activity Type</label>
+            <select
+              value={activityType}
+              onChange={(e) => {
+                setActivityType(e.target.value);
+                setDynamicFields({});
+              }}
+              className="mt-1 w-full p-2 border border-gray-300 rounded"
+              required
+            >
+              <option value="">-- Select activity --</option>
+              {activityOptions.map((a) => (
+                <option key={a} value={a}>
+                  {a}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* DateTime Picker */}
+          <div>
+            <label className="block font-medium text-gray-700">📆 Date & Time</label>
+            <input
+              type="datetime-local"
+              value={timestamp}
+              onChange={(e) => setTimestamp(e.target.value)}
+              className="mt-1 w-full p-2 border border-gray-300 rounded"
+              required
+            />
+          </div>
+
+          {/* Dynamic Fields */}
+          {renderDynamicFields()}
+
+          {/* Details */}
+          <div>
+            <label className="block font-medium text-gray-700">📝 Additional Details (optional)</label>
+            <textarea
+              value={details}
+              onChange={(e) => setDetails(e.target.value)}
+              className="mt-1 w-full p-2 border border-gray-300 rounded"
+              rows={3}
+            />
+          </div>
+
+          {/* Submit */}
+          <button
+            type="submit"
+            className="w-full bg-blue-600 text-white py-2 px-4 rounded hover:bg-blue-700 transition"
           >
-            <option value="">Choose user</option>
-            {users.map((u) => (
-              <option key={u} value={u}>{u}</option>
-            ))}
-          </select>
+            ✅ Submit Log
+          </button>
+        </form>
+
+        <div className="text-center mt-4">
+          <button onClick={() => navigate('/')} className="text-blue-600 underline">
+            ← Back to Dashboard
+          </button>
         </div>
-
-        {/* Activity */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700">⚙️ Activity</label>
-          <select
-            value={activity}
-            onChange={(e) => {
-              setActivity(e.target.value);
-              setFormData({});
-            }}
-            className="block w-full p-2 border border-gray-300 rounded-md"
-            required
-          >
-            <option value="">Select activity</option>
-            {activities.map((a) => (
-              <option key={a} value={a}>{a}</option>
-            ))}
-          </select>
-        </div>
-
-        {/* Date & Time */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700">📅 Date</label>
-          <input
-            type="date"
-            value={activityDate}
-            onChange={(e) => setActivityDate(e.target.value)}
-            className="block w-full p-2 border border-gray-300 rounded-md"
-            required
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700">⏰ Time</label>
-          <input
-            type="time"
-            value={activityTime}
-            onChange={(e) => setActivityTime(e.target.value)}
-            className="block w-full p-2 border border-gray-300 rounded-md"
-            required
-          />
-        </div>
-
-        {/* Dynamic Fields */}
-        {renderDynamicFields()}
-
-        <button
-          type="submit"
-          className="w-full bg-green-600 text-white p-2 rounded-md hover:bg-green-700"
-        >
-          ✅ Submit Log
-        </button>
-      </form>
+      </div>
     </div>
   );
 }
 
-export default LogForm;
+export default CreateLogPage;
+
 
 
 

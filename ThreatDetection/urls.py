@@ -7,12 +7,12 @@ from .views import *
 urlpatterns = [
     path('custom-login/', views.custom_login),
     path('custom-register/', views.custom_register),
-    path('logs/create/', views.custom_log_create),
+    # path('logs/create/', views.custom_log_create),
     path('logs/list/', views.custom_log_list),
     path('users/', views.user_list),
     # path('logs/all/', views.get_threat_chart_data.as_view(), name='all-logs'),
     # path('logs/all/', views.AllLogsView.as_view(), name='all-logs'),
-    path('analyze-logs/', views.analyze_uploaded_logs, name='analyze-logs'),
+    # path('analyze-logs/', views.analyze_uploaded_logs, name='analyze-logs'),
     path('alerts/', views.alerts_list),
 
 

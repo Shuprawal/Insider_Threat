@@ -786,59 +786,6 @@ def get_threat_chart_data(request):
         'barCounts': bar_counts,
     })
 
-#
-#
-# @csrf_exempt
-# def get_threat_chart_data(request):
-#     today = now().date()
-#     one_week_ago = today - timedelta(days=6)
-#     current_hour = now().hour
-#
-#     # Line Chart: Weekly avg confidence score
-#     hourly_scores = (
-#         Alerts.objects
-#         .filter(log__timestamp__date=today)
-#         .values(hour=ExtractHour('log__timestamp'))  # Extract hour from timestamp
-#         .annotate(avg_score=Avg('score'))
-#         .order_by('hour')
-#     )
-#
-#     hourly_labels = [f"{h:02d}:00" for h in range(0, current_hour + 1)]
-#     hourly_scores_map = {entry['hour']: round(entry['avg_score'], 2) for entry in hourly_scores}
-#
-#     hourly_data = [hourly_scores_map.get(h, 0) for h in range(0, current_hour + 1)]
-#
-#     # Bar Chart: Count of threats per day
-#     daily_threats = (
-#         ActivityLogs.objects
-#         .filter(is_suspicious=True, timestamp__date__gte=one_week_ago)
-#         .values('timestamp__date')
-#         .annotate(threat_count=Count('id'))
-#         .order_by('timestamp__date')
-#     )
-#
-#     bar_dates = [str(entry['timestamp__date']) for entry in daily_threats]
-#     bar_counts = [entry['threat_count'] for entry in daily_threats]
-#
-#     # Pie Chart: Top activities
-#     pie_data = (
-#         ActivityLogs.objects
-#         .filter(is_suspicious=True)
-#         .values('activity_type')
-#         .annotate(count=Count('id'))
-#         .order_by('-count')[:5]
-#     )
-#     pie_labels = [entry['activity_type'] for entry in pie_data]
-#     pie_counts = [entry['count'] for entry in pie_data]
-#
-#     return JsonResponse({
-#         'hourLabels': hourly_labels,
-#         'hourScores': hourly_data,
-#         'barDates': bar_dates,
-#         'barCounts': bar_counts,
-#         'pieLabels': pie_labels,
-#         'pieData': pie_counts,
-#     })
 
 @csrf_exempt
 def get_all_logs(request):

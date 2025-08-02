@@ -27,7 +27,6 @@ from rest_framework.authtoken.views import obtain_auth_token
 urlpatterns = [
 
     path('api/', include('ThreatDetection.urls')),
-
-
+    path('api/', include('src.logs.urls')),
 
 ]
