@@ -1,8 +1,5 @@
-
-
 import React from 'react';
 import { Line, Pie, Bar } from 'react-chartjs-2';
-
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -28,13 +25,12 @@ ChartJS.register(
   Legend
 );
 
-
-function DashboardCharts({ labels, data, pieData, barData }) {
+function DashboardCharts({ labels, data, pieData, barData, barMode, setBarMode, topThreatUsers, hourDetails }) {
   const lineChartData = {
     labels,
     datasets: [
       {
-        label: 'Logs Over Time',
+        label: 'Avg. Threat Score per Hour',
         data,
         borderColor: '#3b82f6',
         backgroundColor: 'rgba(59, 130, 246, 0.3)',
@@ -50,50 +46,120 @@ function DashboardCharts({ labels, data, pieData, barData }) {
       legend: { position: 'top' },
       title: {
         display: true,
-        text: '📈 Hourly Average Threat Score for Today'
+        text: '📈 Hourly Average Threat Score'
+      },
+      tooltip: {
+        callbacks: {
+          label: (context) => {
+            const label = `Score: ${context.raw}`;
+            const hour = context.label;
+            // const match = hourDetails?.find(d => d.hour === hour);
+            const match = hourDetails?.find(d => d.period === hour);
+
+            if (match) {
+              return [`👤 ${match.user}`, `📌 ${match.reason}`, label];
+            }
+            return label;
+          }
+        }
       }
     }
   };
 
+  const pieChartData = {
+    labels: pieData.labels,
+    datasets: [
+      {
+        data: pieData.values,
+        backgroundColor: ['#f87171', '#facc15', '#4ade80', '#60a5fa', '#a78bfa'],
+        hoverOffset: 6
+      }
+    ]
+  };
 
   const pieOptions = {
     responsive: true,
     plugins: {
       legend: { position: 'bottom' },
-      title: { display: true, text: '🧪 Threat Distribution' }
+      title: { display: true, text: '🧪 Top Suspicious Activities' }
     }
+  };
+
+  const barChartData = {
+    labels: barData.labels,
+    datasets: [
+      {
+        label: barMode === 'score' ? 'Avg. Threat Score' : 'Suspicious Activity Count',
+        data: barData.values,
+        backgroundColor: '#facc15',
+        barThickness: 60
+      }
+    ]
   };
 
   const barOptions = {
     responsive: true,
     plugins: {
       legend: { display: false },
-      title: { display: true, text: '👥 Users with Most Flags' }
+      title: {
+        display: true,
+        text:
+          barMode === 'score'
+            ? '👥 Users with Highest Threat Scores'
+            : '👥 Users with Most Suspicious Activities'
+      }
     }
   };
 
   return (
     <div className="flex flex-col gap-6">
-      {/* Full-width line chart with dark background */}
-      <div className="bg-gray-900 rounded-xl p-6 shadow-md w-full">
-        <Line data={lineChartData} options={lineOptions} />
+      {/* Line Chart + Top Users List */}
+      <div className="bg-gray-900 rounded-xl p-6 shadow-md w-full md:flex">
+        <div className="md:w-3/4">
+          <Line data={lineChartData} options={lineOptions} />
+        </div>
+
+        <div className="md:w-1/4 md:pl-6 mt-4 md:mt-0 text-white">
+          <h3 className="text-lg font-semibold mb-2">🧍 Top Threat Users</h3>
+          <ul className="space-y-1 text-sm">
+            {topThreatUsers && topThreatUsers.map((user, idx) => (
+              <li key={idx} className="border-b border-gray-700 pb-1">
+                <strong>{user.username}</strong>: {user.count} threats
+              </li>
+            ))}
+          </ul>
+        </div>
       </div>
 
-      {/* Row of pie and bar charts below */}
+      {/* Pie and Bar Charts */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div className="bg-gray-900 rounded-xl p-6 shadow-md">
-          <Pie data={pieData} options={pieOptions} />
+          <Pie data={pieChartData} options={pieOptions} />
         </div>
+
         <div className="bg-gray-900 rounded-xl p-6 shadow-md">
-          <Bar data={barData} options={barOptions} />
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-white text-lg font-semibold">
+              {barMode === 'score' ? '👥 Top Users by Threat Score' : '👥 Top Users by Suspicious Activity Count'}
+            </h2>
+            <button
+              onClick={() => setBarMode(prev => (prev === 'score' ? 'count' : 'score'))}
+              className="bg-gray-700 text-white px-3 py-1 text-sm rounded hover:bg-gray-600"
+            >
+              Toggle to {barMode === 'score' ? 'Count' : 'Score'}
+            </button>
+          </div>
+          <Bar data={barChartData} options={barOptions} />
         </div>
       </div>
     </div>
   );
 }
 
-
 export default DashboardCharts;
+
+
+
 
 //
 // import React from 'react';

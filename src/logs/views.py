@@ -15,6 +15,8 @@ import joblib, traceback, json
 import pandas as pd
 # from .models import CustomUser, ActivityLogs, Alerts
 
+from ..mlengine.utils import *
+
 
 from ThreatDetection.models import *
 import pandas as pd
@@ -120,9 +122,9 @@ class AnalyzeLogs(View):
 
                 df_combined = df_features.merge(df[['user', 'timestamp', 'activity']], on='user', how='left')
                 alerts_created = []
-
-                for _, row in df_combined.iterrows():
+                for index, row in df_combined.iterrows():
                     default_user = CustomUser.objects.first()
+
                     log = ActivityLogs.objects.create(
                         user=default_user,
                         activity_type=row['activity'],
@@ -134,11 +136,20 @@ class AnalyzeLogs(View):
                     )
 
                     if row['is_anomaly']:
+                        # 📌 SHAP explanation (pass one row of model_input_df)
+                        shap_reason = generate_shap_reason_for_threat(
+                            model=random_forest_model,
+                            input_df=model_input_df.iloc[[index]],
+                            feature_names=expected_features
+                        )
+
                         alert = Alerts.objects.create(
                             log=log,
                             score=round(abs(row['isolation_score']), 4),
-                            status='open'
+                            status='open',
+                            reason=shap_reason  # ✅ store SHAP reason
                         )
+
                         alerts_created.append({
                             'id': alert.id,
                             'user': row['user'],
@@ -148,7 +159,9 @@ class AnalyzeLogs(View):
                             'confidence': round(row['rf_confidence'] * 100, 2),
                             'status': alert.status,
                             'created_at': alert.created_at,
+                            'reason': shap_reason  # ✅ include in response
                         })
+
 
                         channel_layer = get_channel_layer()
                         async_to_sync(channel_layer.group_send)(
@@ -156,15 +169,61 @@ class AnalyzeLogs(View):
                             {
                                 "type": "send_threat_alert",
                                 "data": {
-                                    "message": "\ud83d\udea8 Insider threat detected",
+                                    "message": "🚨 Insider threat detected",
                                     "user": row['user'],
                                     "activity": row['activity'],
                                     "score": round(abs(row['isolation_score']), 4),
                                     "confidence": round(row['rf_confidence'] * 100, 2),
-                                    "timestamp": str(row['timestamp'])
+                                    "timestamp": str(row['timestamp']),
+                                    "reason": shap_reason
                                 }
                             }
                         )
+
+                # for _, row in df_combined.iterrows():
+                #     default_user = CustomUser.objects.first()
+                #     log = ActivityLogs.objects.create(
+                #         user=default_user,
+                #         activity_type=row['activity'],
+                #         resource_accessed='',
+                #         action_result='Flagged as suspicious' if row['is_anomaly'] else 'Normal',
+                #         timestamp=row['timestamp'],
+                #         is_suspicious=bool(row['is_anomaly']),
+                #         details=f"Auto-processed: {row['activity']}"
+                #     )
+                #
+                #     if row['is_anomaly']:
+                #         alert = Alerts.objects.create(
+                #             log=log,
+                #             score=round(abs(row['isolation_score']), 4),
+                #             status='open'
+                #         )
+                #         alerts_created.append({
+                #             'id': alert.id,
+                #             'user': row['user'],
+                #             'activity': row['activity'],
+                #             'timestamp': str(row['timestamp']),
+                #             'score': round(abs(row['isolation_score']), 4),
+                #             'confidence': round(row['rf_confidence'] * 100, 2),
+                #             'status': alert.status,
+                #             'created_at': alert.created_at,
+                #         })
+                #
+                #         channel_layer = get_channel_layer()
+                #         async_to_sync(channel_layer.group_send)(
+                #             "threats",
+                #             {
+                #                 "type": "send_threat_alert",
+                #                 "data": {
+                #                     "message": "\ud83d\udea8 Insider threat detected",
+                #                     "user": row['user'],
+                #                     "activity": row['activity'],
+                #                     "score": round(abs(row['isolation_score']), 4),
+                #                     "confidence": round(row['rf_confidence'] * 100, 2),
+                #                     "timestamp": str(row['timestamp'])
+                #                 }
+                #             }
+                #         )
 
                 return JsonResponse({
                     'anomalies': alerts_created,
@@ -190,10 +249,9 @@ class SingleLogAnalyzer(View):
 
         return JsonResponse(list(users), safe=False)
 
+
     def post(self, request):
-        print('a')
         try:
-            # Load model
             hybrid_model_bundle = joblib.load('ai_model/final_hybrid_threat_model_daily.pkl')
             scaler = hybrid_model_bundle['scaling_module']
             isolation_model = hybrid_model_bundle['iforest_module']
@@ -203,6 +261,7 @@ class SingleLogAnalyzer(View):
             return JsonResponse({'error': 'Model file not found.'}, status=500)
 
         try:
+            # 📥 Parse input
             if request.content_type == 'application/json':
                 data = json.loads(request.body.decode('utf-8'))
             else:
@@ -218,7 +277,7 @@ class SingleLogAnalyzer(View):
             timestamp_str = data.get('timestamp')
             timestamp = make_aware(datetime.strptime(timestamp_str, "%Y-%m-%dT%H:%M"))
 
-            # Construct synthetic daily log dataframe for model
+            # 🏗️ Prepare feature row
             feature_row = {
                 'user': user_obj.username,
                 'day': timestamp.date().isoformat(),
@@ -236,7 +295,7 @@ class SingleLogAnalyzer(View):
                 'logon_to_email_event_ratio': 0
             }
 
-            # Add dummy psych traits
+            # ➕ Dummy psychological traits
             for trait in [
                 'trait_openness_score', 'trait_conscientiousness_score', 'trait_extraversion_score',
                 'trait_agreeableness_score', 'trait_neuroticism_score'
@@ -247,12 +306,13 @@ class SingleLogAnalyzer(View):
             model_input_df = df_features[expected_features].fillna(0)
             model_input_scaled = scaler.transform(model_input_df)
 
+            # 🔍 Prediction
             isolation_score = isolation_model.decision_function(model_input_scaled)[0]
             prediction = random_forest_model.predict(model_input_df)[0]
             confidence = random_forest_model.predict_proba(model_input_df)[0][1]
             is_anomaly = bool(prediction == 1)
 
-            # Save to ActivityLogs
+            # 📝 Create activity log
             log = ActivityLogs.objects.create(
                 user=user_obj,
                 activity_type=activity,
@@ -264,19 +324,32 @@ class SingleLogAnalyzer(View):
             )
 
             alert_info = None
+
             if is_anomaly:
+                # ✅ SHAP explanation
+                shap_reason = generate_shap_reason_for_threat(
+                    model=random_forest_model,
+                    input_df=model_input_df,
+                    feature_names=expected_features
+                )
+
+                # 🛎️ Create alert with SHAP reason
                 alert = Alerts.objects.create(
                     log=log,
                     score=round(abs(isolation_score), 4),
-                    status='open'
+                    status='open',
+                    reason=shap_reason
                 )
+
                 alert_info = {
                     'alert_id': alert.id,
                     'score': round(abs(isolation_score), 4),
                     'confidence': round(confidence * 100, 2),
-                    'status': str(alert.status)
+                    'status': str(alert.status),
+                    'reason': shap_reason
                 }
 
+            # ✅ Return response
             return JsonResponse({
                 'log_id': log.id,
                 'is_anomaly': is_anomaly,

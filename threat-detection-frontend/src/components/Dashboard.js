@@ -11,10 +11,29 @@ function RealTimeInsiderThreatDashboardComponent({ setAuth }) {
   const [realTimeThreatAlerts, setRealTimeThreatAlerts] = useState([]);
   const [errorMessageOnDashboard, setErrorMessageOnDashboard] = useState('');
   const [dashboardLoadingState, setDashboardLoadingState] = useState(false);
+  const [barScores, setBarScores] = useState([]);
+  const [topThreatUsers, setTopThreatUsers] = useState([]);
+  const [hourDetails, setHourDetails] = useState([]);
+  const [groupBy, setGroupBy] = useState('hour');
+
+
+
+  // ✅ NEW: State for chart data
+  const [pieLabels, setPieLabels] = useState([]);
+  const [pieCounts, setPieCounts] = useState([]);
+  const [barLabels, setBarLabels] = useState([]);
+  const [barCounts, setBarCounts] = useState([]);
+  const [barMode, setBarMode] = useState('score'); // 'score' or 'count'
+
+
   const navigationToOtherPages = useNavigate();
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
 
   const fetchLogsAndAlertsFromServer = async () => {
     setDashboardLoadingState(true);
+
+
     setErrorMessageOnDashboard('');
     try {
       const token = localStorage.getItem('custom_token');
@@ -22,13 +41,36 @@ function RealTimeInsiderThreatDashboardComponent({ setAuth }) {
       const [logsRes, alertsRes, chartRes] = await Promise.all([
         axios.get('http://localhost:8000/api/logs/all/', { headers: { Authorization: `Bearer ${token}` } }),
         axios.get('http://localhost:8000/api/alerts/', { headers: { Authorization: `Bearer ${token}` } }),
-        axios.get('http://localhost:8000/api/dashboard-data/', { headers: { Authorization: `Bearer ${token}` } }),
+        axios.get('http://localhost:8000/api/dashboard-data/', {
+          headers: { Authorization: `Bearer ${token}` },
+          params: {
+            ...(startDate && { start_date: startDate }),
+            ...(endDate && { end_date: endDate }),
+          }
+        }),
       ]);
 
       setArrayOfSystemUserLogs(logsRes.data.logs || []);
       setNumberOfOpenAlerts(alertsRes.data.length || 0);
       setHourLabels(chartRes.data.hourLabels || []);
       setHourScores(chartRes.data.hourScores || []);
+      setTopThreatUsers(chartRes.data.topThreatUsers || []);
+      // setHourDetails(chartRes.data.hourDetails || []);
+      setHourDetails(chartRes.data.tooltipDetails || []);
+
+
+      // ✅ NEW: Set pie/bar data
+      setPieLabels(chartRes.data.pieLabels || []);
+      setPieCounts(chartRes.data.pieData || []);
+      setBarLabels(chartRes.data.barLabels || []);
+      // setBarCounts(chartRes.data.barData || []);
+      setBarLabels(chartRes.data.barLabels || []);
+      setBarCounts(chartRes.data.barCounts || []);
+      setBarScores(chartRes.data.barScores || []);
+      setGroupBy(chartRes.data.groupBy || 'hour');
+
+
+
 
     } catch (error) {
       setErrorMessageOnDashboard('🚨 Failed to retrieve data. Please refresh.');
@@ -39,7 +81,11 @@ function RealTimeInsiderThreatDashboardComponent({ setAuth }) {
   };
 
   useEffect(() => {
+    const today = new Date().toISOString().split('T')[0];
+    setStartDate(today);
+    setEndDate(today);
     fetchLogsAndAlertsFromServer();
+
     const token = localStorage.getItem("custom_token");
     const socket = new WebSocket(`ws://localhost:8000/ws/threats/?token=${token}`);
 
@@ -67,25 +113,6 @@ function RealTimeInsiderThreatDashboardComponent({ setAuth }) {
 
   const totalLogs = arrayOfSystemUserLogs.length;
   const suspiciousLogs = arrayOfSystemUserLogs.filter(log => log.is_suspicious).length;
-  const pieData = {
-    labels: ['Suspicious Logs', 'Normal Logs'],
-    datasets: [{
-      data: [suspiciousLogs, totalLogs - suspiciousLogs],
-      backgroundColor: ['#f87171', '#34d399']
-    }]
-  };
-  const topUsers = Object.entries(
-    arrayOfSystemUserLogs.filter(l => l.is_suspicious).reduce((acc, l) => {
-      const name = l.user?.username || 'Unknown';
-      acc[name] = (acc[name] || 0) + 1;
-      return acc;
-    }, {})
-  ).sort((a, b) => b[1] - a[1]).slice(0, 5);
-
-  const barData = {
-    labels: topUsers.map(([u]) => u),
-    datasets: [{ label: 'Suspicious Logs', data: topUsers.map(([_, c]) => c), backgroundColor: '#facc15' }]
-  };
 
   return (
     <div className="min-h-screen bg-gray-100 p-6 font-sans">
@@ -97,6 +124,37 @@ function RealTimeInsiderThreatDashboardComponent({ setAuth }) {
           <button onClick={() => navigationToOtherPages('/analyze')} className="bg-blue-500 px-3 py-1 rounded text-sm hover:bg-blue-600">Analyze</button>
           <button onClick={() => { localStorage.removeItem('custom_token'); setAuth(false); navigationToOtherPages('/login'); }} className="bg-red-600 px-4 py-2 rounded hover:bg-red-700">Logout</button>
         </div>
+      </div>
+
+      <div className="flex flex-col md:flex-row items-center gap-4 mb-6">
+        <div className="flex items-center gap-2">
+          <label htmlFor="start" className="font-semibold text-gray-700">📅 From:</label>
+          <input
+            type="date"
+            id="start"
+            className="border rounded px-2 py-1"
+            value={startDate}
+            onChange={(e) => setStartDate(e.target.value)}
+          />
+        </div>
+
+        <div className="flex items-center gap-2">
+          <label htmlFor="end" className="font-semibold text-gray-700">📅 To:</label>
+          <input
+            type="date"
+            id="end"
+            className="border rounded px-2 py-1"
+            value={endDate}
+            onChange={(e) => setEndDate(e.target.value)}
+          />
+        </div>
+
+        <button
+          onClick={fetchLogsAndAlertsFromServer}
+          className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded"
+        >
+          🔄 Refresh Dashboard
+        </button>
       </div>
 
       {realTimeThreatAlerts.length > 0 && (
@@ -116,12 +174,29 @@ function RealTimeInsiderThreatDashboardComponent({ setAuth }) {
         <StatCard label="🚨 Active Alerts" value={numberOfOpenAlerts} color="red" />
       </div>
 
+      {/*<div className="mb-4 flex justify-end">*/}
+      {/*  <button*/}
+      {/*    onClick={() => setBarMode(prev => (prev === 'score' ? 'count' : 'score'))}*/}
+      {/*    className="bg-gray-800 text-white px-4 py-2 rounded hover:bg-gray-700"*/}
+      {/*  >*/}
+      {/*    Toggle to {barMode === 'score' ? 'Suspicious Count' : 'Threat Score'}*/}
+      {/*  </button>*/}
+      {/*</div>*/}
+
+
+
       <DashboardCharts
         labels={hourLabels}
         data={hourScores}
-        pieData={pieData}
-        barData={barData}
+        pieData={{ labels: pieLabels, values: pieCounts }}
+        barData={{ labels: barLabels, values: barMode === 'score' ? barScores : barCounts }}
+        barMode={barMode}
+        setBarMode={setBarMode}
+        topThreatUsers={topThreatUsers}
+        hourDetails={hourDetails}
+        groupBy={groupBy}
       />
+
     </div>
   );
 }

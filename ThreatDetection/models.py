@@ -63,6 +63,8 @@ class Alerts(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     assigned_to = models.ForeignKey(CustomUser, on_delete=models.SET_NULL, null=True, blank=True, related_name='assigned_alerts')
     notes = models.TextField(blank=True)
+    reason = models.TextField(blank=True, null=True)
+
 
     def __str__(self):
         return f"Alert for {self.log.id} - Score {self.score}"

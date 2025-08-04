@@ -28,5 +28,6 @@ urlpatterns = [
 
     path('api/', include('ThreatDetection.urls')),
     path('api/', include('src.logs.urls')),
+    path('api/', include('src.dashboard.urls')),
 
 ]

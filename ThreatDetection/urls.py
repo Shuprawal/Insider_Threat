@@ -21,7 +21,7 @@ urlpatterns = [
     path('hybrid-threats/', hybrid_user_level_threat_detection, name='hybrid_threats'),
 
     path('logs/all/', get_all_logs, name='get_all_logs'),
-    path('dashboard-data/', get_threat_chart_data, name='dashboard_data'),
+    # path('dashboard-data/', get_threat_chart_data, name='dashboard_data'),
 
 
 ]
