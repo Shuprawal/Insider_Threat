@@ -2,7 +2,6 @@ from django.contrib.auth.base_user import BaseUserManager
 from django.db import models
 import hashlib
 
-
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin
 class CustomUserManager(BaseUserManager):
     def create_user(self, username, password=None, **extra_fields):
@@ -18,8 +17,9 @@ class CustomUserManager(BaseUserManager):
         user = self.create_user(username, password, **extra_fields)
         return user
 
-class CustomUser(AbstractBaseUser, PermissionsMixin):  # ✅ fixed here
+class CustomUser(AbstractBaseUser, PermissionsMixin):
     id = models.AutoField(primary_key=True)
+    email = models.EmailField(unique=True, blank=False, null=False)
     username = models.CharField(max_length=150, unique=True)
     password = models.CharField(max_length=256)
     department = models.CharField(max_length=100, blank=True)

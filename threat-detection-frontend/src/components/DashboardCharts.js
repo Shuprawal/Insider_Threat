@@ -25,17 +25,19 @@ ChartJS.register(
   Legend
 );
 
-function DashboardCharts({ labels, data, pieData, barData, barMode, setBarMode, topThreatUsers, hourDetails }) {
+function DashboardCharts({ alertPoints, pieData, barData, barMode, setBarMode, topThreatUsers }) {
   const lineChartData = {
-    labels,
+    labels: alertPoints.map(point => point.timestamp),
     datasets: [
       {
-        label: 'Avg. Threat Score per Hour',
-        data,
+        label: 'Threat Score',
+        data: alertPoints.map(point => point.score),
         borderColor: '#3b82f6',
         backgroundColor: 'rgba(59, 130, 246, 0.3)',
         fill: true,
-        tension: 0.4
+        tension: 0.4,
+        pointRadius: 5,
+        pointHoverRadius: 7
       }
     ]
   };
@@ -50,16 +52,13 @@ function DashboardCharts({ labels, data, pieData, barData, barMode, setBarMode, 
       },
       tooltip: {
         callbacks: {
-          label: (context) => {
-            const label = `Score: ${context.raw}`;
-            const hour = context.label;
-            // const match = hourDetails?.find(d => d.hour === hour);
-            const match = hourDetails?.find(d => d.period === hour);
-
-            if (match) {
-              return [`👤 ${match.user}`, `📌 ${match.reason}`, label];
+          label: function (context) {
+            const index = context.dataIndex;
+            const point = alertPoints[index];
+            if (point) {
+              return [`👤 ${point.user}`, `📌 ${point.reason}`, `Score: ${point.score}`];
             }
-            return label;
+            return `Score: ${context.raw}`;
           }
         }
       }
@@ -79,6 +78,7 @@ function DashboardCharts({ labels, data, pieData, barData, barMode, setBarMode, 
 
   const pieOptions = {
     responsive: true,
+    maintainAspectRatio: false,
     plugins: {
       legend: { position: 'bottom' },
       title: { display: true, text: '🧪 Top Suspicious Activities' }
@@ -99,6 +99,7 @@ function DashboardCharts({ labels, data, pieData, barData, barMode, setBarMode, 
 
   const barOptions = {
     responsive: true,
+    maintainAspectRatio: false,
     plugins: {
       legend: { display: false },
       title: {
@@ -114,12 +115,14 @@ function DashboardCharts({ labels, data, pieData, barData, barMode, setBarMode, 
   return (
     <div className="flex flex-col gap-6">
       {/* Line Chart + Top Users List */}
-      <div className="bg-gray-900 rounded-xl p-6 shadow-md w-full md:flex">
-        <div className="md:w-3/4">
+      <div className="w-full md:flex md:gap-6">
+        {/* Left Box - Line Chart */}
+        <div className="bg-gray-900 rounded-xl p-6 shadow-md md:w-3/4 w-full">
           <Line data={lineChartData} options={lineOptions} />
         </div>
 
-        <div className="md:w-1/4 md:pl-6 mt-4 md:mt-0 text-white">
+        {/* Right Box - Top Threat Users */}
+        <div className="bg-gray-900 rounded-xl p-6 shadow-md md:w-1/4 w-full mt-6 md:mt-0 text-white">
           <h3 className="text-lg font-semibold mb-2">🧍 Top Threat Users</h3>
           <ul className="space-y-1 text-sm">
             {topThreatUsers && topThreatUsers.map((user, idx) => (
@@ -133,11 +136,13 @@ function DashboardCharts({ labels, data, pieData, barData, barMode, setBarMode, 
 
       {/* Pie and Bar Charts */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="bg-gray-900 rounded-xl p-6 shadow-md">
+        {/* Pie Chart with fixed height */}
+        <div className="bg-gray-900 rounded-xl p-6 shadow-md h-[500px]">
           <Pie data={pieChartData} options={pieOptions} />
         </div>
 
-        <div className="bg-gray-900 rounded-xl p-6 shadow-md">
+        {/* Bar Chart with fixed height */}
+        <div className="bg-gray-900 rounded-xl p-6 shadow-md h-[500px] flex flex-col">
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-white text-lg font-semibold">
               {barMode === 'score' ? '👥 Top Users by Threat Score' : '👥 Top Users by Suspicious Activity Count'}
@@ -149,7 +154,9 @@ function DashboardCharts({ labels, data, pieData, barData, barMode, setBarMode, 
               Toggle to {barMode === 'score' ? 'Count' : 'Score'}
             </button>
           </div>
-          <Bar data={barChartData} options={barOptions} />
+          <div className="flex-1">
+            <Bar data={barChartData} options={barOptions} />
+          </div>
         </div>
       </div>
     </div>
@@ -157,7 +164,6 @@ function DashboardCharts({ labels, data, pieData, barData, barMode, setBarMode, 
 }
 
 export default DashboardCharts;
-
 
 
 

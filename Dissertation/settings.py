@@ -56,7 +56,8 @@ INSTALLED_APPS = [
     'src.dashboard',
     'src.logs',
     'src.alerts',
-    'src.mlengine'
+    'src.mlengine',
+    'src.users',
 
 ]
 

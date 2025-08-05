@@ -6,6 +6,10 @@ import Dashboard from './components/Dashboard';
 import AlertsPage from './components/AlertsPage';
 import CreateLogPage from './components/CreateLogPage';
 import LogAnalyzer from './components/LogAnalyzer';
+import UsersPage from "./components/users";
+import UserDetailsPage from "./components/UserDetailsPage";
+
+
 
 
 function App() {
@@ -52,7 +56,13 @@ function App() {
             isAuthenticated ? <Dashboard setAuth={setIsAuthenticated} /> : <Navigate to="/login" />
           }
         />
+        <Route path="/users" element={<UsersPage />} />
+
+        <Route path="/users/:userId" element={<UserDetailsPage />} />
+
+
         <Route path="*" element={<Navigate to="/login" />} />
+
       </Routes>
     </Router>
   );

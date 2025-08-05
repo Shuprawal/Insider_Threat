@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
+import Navbar from './Navbar';
 
-const LogAnalyzer = () => {
+const LogAnalyzer = ({ setAuth }) => {
   const [file, setFile] = useState(null);
   const [anomalies, setAnomalies] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -13,6 +14,7 @@ const LogAnalyzer = () => {
     setAnomalies([]);
     setFile(e.target.files[0]);
   };
+
   const handleAnalyze = async () => {
     if (!file) {
       setError("Please select a file to upload.");
@@ -27,9 +29,9 @@ const LogAnalyzer = () => {
     setInfo('');
 
     try {
-        const response = await fetch('http://localhost:8000/api/analyze-logs/', {
+      const response = await fetch('http://localhost:8000/api/analyze-logs/', {
         method: 'POST',
-        body: formData
+        body: formData,
       });
 
       const data = await response.json();
@@ -51,8 +53,10 @@ const LogAnalyzer = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-100 py-10 px-4 sm:px-10">
-      <div className="max-w-4xl mx-auto bg-white rounded-lg shadow-xl p-8">
+    <div className="min-h-screen bg-gray-100">
+      <Navbar setAuth={setAuth} />
+
+      <div className="max-w-4xl mx-auto bg-white rounded-lg shadow-xl p-8 mt-6">
         <h2 className="text-2xl font-semibold text-center text-blue-700 mb-6">
           🧠 Analyze Activity Logs with AI
         </h2>
@@ -61,7 +65,7 @@ const LogAnalyzer = () => {
           <input
             type="file"
             onChange={handleFileChange}
-            className="block w-full sm:w-auto border rounded px-4 py-2 shadow-sm"
+            className="block w-full sm:w-auto border border-gray-300 rounded px-4 py-2 shadow-sm"
           />
           <button
             onClick={handleAnalyze}
@@ -96,13 +100,13 @@ const LogAnalyzer = () => {
                     <th className="px-4 py-2 border">User</th>
                     <th className="px-4 py-2 border">Activity</th>
                     <th className="px-4 py-2 border">Date</th>
-                    <th className="px-4 py-2 border">Confidence</th> {/* NEW */}
+                    <th className="px-4 py-2 border">Confidence</th>
                     <th className="px-4 py-2 border">Score</th>
                   </tr>
                 </thead>
                 <tbody>
                   {anomalies.map((row, idx) => {
-                    const isThreat = row.confidence >= 50; // You can adjust this threshold
+                    const isThreat = row.confidence >= 50;
                     const activityStyle = isThreat
                       ? "bg-red-100 text-red-800 font-bold"
                       : "bg-green-100 text-green-800 font-bold";
@@ -111,14 +115,15 @@ const LogAnalyzer = () => {
                       <tr key={idx} className="text-center transition hover:bg-gray-50">
                         <td className="border px-4 py-2 font-medium text-gray-800">{row.user}</td>
                         <td className={`border px-4 py-2 ${activityStyle}`}>{row.activity}</td>
-                        <td className="border px-4 py-2 text-sm text-gray-600">{new Date(row.timestamp).toLocaleString()}</td>
+                        <td className="border px-4 py-2 text-sm text-gray-600">
+                          {new Date(row.timestamp).toLocaleString()}
+                        </td>
                         <td className="border px-4 py-2 text-yellow-800 font-bold">{row.confidence}%</td>
                         <td className="border px-4 py-2 text-purple-700">{row.score}</td>
                       </tr>
                     );
                   })}
                 </tbody>
-
               </table>
             </div>
           </div>

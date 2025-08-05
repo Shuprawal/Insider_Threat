@@ -1,8 +1,8 @@
-
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
+import Navbar from './Navbar';
 
-function AlertsPage() {
+function AlertsPage({ setAuth }) {
   const [alerts, setAlerts] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -27,13 +27,16 @@ function AlertsPage() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-gradient-to-tr from-gray-50 via-blue-100 to-blue-200 p-6">
+    <div className="min-h-screen bg-gradient-to-tr from-gray-50 via-blue-100 to-blue-200 ">
+      <Navbar setAuth={setAuth} />
+
       <div className="bg-white p-6 rounded-xl shadow-2xl border border-red-300">
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-2xl font-semibold text-red-800">🚨 Suspicious Alerts</h2>
           <button
             onClick={fetchAlerts}
-            className="px-5 py-2 rounded-lg font-semibold shadow-md text-white bg-red-600 hover:bg-red-700 transition-all">
+            className="px-5 py-2 rounded-lg font-semibold shadow-md text-white bg-red-600 hover:bg-red-700 transition-all"
+          >
             Refresh Alerts
           </button>
         </div>

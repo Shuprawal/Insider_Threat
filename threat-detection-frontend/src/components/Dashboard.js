@@ -2,10 +2,10 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import DashboardCharts from './DashboardCharts';
+import Navbar from "./Navbar";
+import DateFilter from "./Date";
 
 function RealTimeInsiderThreatDashboardComponent({ setAuth }) {
-  const [hourLabels, setHourLabels] = useState([]);
-  const [hourScores, setHourScores] = useState([]);
   const [arrayOfSystemUserLogs, setArrayOfSystemUserLogs] = useState([]);
   const [numberOfOpenAlerts, setNumberOfOpenAlerts] = useState(0);
   const [realTimeThreatAlerts, setRealTimeThreatAlerts] = useState([]);
@@ -13,18 +13,14 @@ function RealTimeInsiderThreatDashboardComponent({ setAuth }) {
   const [dashboardLoadingState, setDashboardLoadingState] = useState(false);
   const [barScores, setBarScores] = useState([]);
   const [topThreatUsers, setTopThreatUsers] = useState([]);
-  const [hourDetails, setHourDetails] = useState([]);
   const [groupBy, setGroupBy] = useState('hour');
+  const [alertPoints, setAlertPoints] = useState([]);
 
-
-
-  // ✅ NEW: State for chart data
   const [pieLabels, setPieLabels] = useState([]);
   const [pieCounts, setPieCounts] = useState([]);
   const [barLabels, setBarLabels] = useState([]);
   const [barCounts, setBarCounts] = useState([]);
-  const [barMode, setBarMode] = useState('score'); // 'score' or 'count'
-
+  const [barMode, setBarMode] = useState('score');
 
   const navigationToOtherPages = useNavigate();
   const [startDate, setStartDate] = useState('');
@@ -32,12 +28,9 @@ function RealTimeInsiderThreatDashboardComponent({ setAuth }) {
 
   const fetchLogsAndAlertsFromServer = async () => {
     setDashboardLoadingState(true);
-
-
     setErrorMessageOnDashboard('');
     try {
       const token = localStorage.getItem('custom_token');
-
       const [logsRes, alertsRes, chartRes] = await Promise.all([
         axios.get('http://localhost:8000/api/logs/all/', { headers: { Authorization: `Bearer ${token}` } }),
         axios.get('http://localhost:8000/api/alerts/', { headers: { Authorization: `Bearer ${token}` } }),
@@ -52,25 +45,14 @@ function RealTimeInsiderThreatDashboardComponent({ setAuth }) {
 
       setArrayOfSystemUserLogs(logsRes.data.logs || []);
       setNumberOfOpenAlerts(alertsRes.data.length || 0);
-      setHourLabels(chartRes.data.hourLabels || []);
-      setHourScores(chartRes.data.hourScores || []);
       setTopThreatUsers(chartRes.data.topThreatUsers || []);
-      // setHourDetails(chartRes.data.hourDetails || []);
-      setHourDetails(chartRes.data.tooltipDetails || []);
-
-
-      // ✅ NEW: Set pie/bar data
+      setAlertPoints(chartRes.data.alertPoints || []);
       setPieLabels(chartRes.data.pieLabels || []);
       setPieCounts(chartRes.data.pieData || []);
-      setBarLabels(chartRes.data.barLabels || []);
-      // setBarCounts(chartRes.data.barData || []);
       setBarLabels(chartRes.data.barLabels || []);
       setBarCounts(chartRes.data.barCounts || []);
       setBarScores(chartRes.data.barScores || []);
       setGroupBy(chartRes.data.groupBy || 'hour');
-
-
-
 
     } catch (error) {
       setErrorMessageOnDashboard('🚨 Failed to retrieve data. Please refresh.');
@@ -115,108 +97,102 @@ function RealTimeInsiderThreatDashboardComponent({ setAuth }) {
   const suspiciousLogs = arrayOfSystemUserLogs.filter(log => log.is_suspicious).length;
 
   return (
-    <div className="min-h-screen bg-gray-100 p-6 font-sans">
-      <div className="bg-indigo-900 text-white p-4 rounded-lg shadow-lg flex justify-between items-center mb-8">
-        <h1 className="text-3xl font-extrabold tracking-wide">🧠 Insider Threat Monitor</h1>
-        <div className="flex gap-3">
-          <button onClick={() => navigationToOtherPages('/log')} className="bg-green-600 px-3 py-1 rounded text-sm hover:bg-green-700">+ Submit Log</button>
-          <button onClick={() => navigationToOtherPages('/alerts')} className="bg-yellow-500 px-3 py-1 rounded text-sm hover:bg-yellow-600">Alerts</button>
-          <button onClick={() => navigationToOtherPages('/analyze')} className="bg-blue-500 px-3 py-1 rounded text-sm hover:bg-blue-600">Analyze</button>
-          <button onClick={() => { localStorage.removeItem('custom_token'); setAuth(false); navigationToOtherPages('/login'); }} className="bg-red-600 px-4 py-2 rounded hover:bg-red-700">Logout</button>
-        </div>
-      </div>
+    <div className="min-h-screen bg-[#502414] text-white font-sans">
+      <Navbar setAuth={setAuth} />
 
-      <div className="flex flex-col md:flex-row items-center gap-4 mb-6">
-        <div className="flex items-center gap-2">
-          <label htmlFor="start" className="font-semibold text-gray-700">📅 From:</label>
-          <input
-            type="date"
-            id="start"
-            className="border rounded px-2 py-1"
-            value={startDate}
-            onChange={(e) => setStartDate(e.target.value)}
-          />
-        </div>
-
-        <div className="flex items-center gap-2">
-          <label htmlFor="end" className="font-semibold text-gray-700">📅 To:</label>
-          <input
-            type="date"
-            id="end"
-            className="border rounded px-2 py-1"
-            value={endDate}
-            onChange={(e) => setEndDate(e.target.value)}
-          />
-        </div>
-
-        <button
-          onClick={fetchLogsAndAlertsFromServer}
-          className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded"
-        >
-          🔄 Refresh Dashboard
-        </button>
-      </div>
 
       {realTimeThreatAlerts.length > 0 && (
-        <div className="bg-red-50 border-l-8 border-red-500 p-4 mb-6 rounded-xl shadow animate-pulse">
-          <h2 className="text-lg font-semibold text-red-800 mb-2">⚠️ Real-Time Threat Alert</h2>
-          <ul className="text-gray-700 list-disc pl-5 space-y-1">
+        <div className="bg-red-100 border-l-8 border-red-600 text-red-800 p-4 mb-6 rounded-xl shadow">
+          <h2 className="text-lg font-bold mb-2">⚠️ Real-Time Threat Alert</h2>
+          <ul className="list-disc pl-5 space-y-1">
             {realTimeThreatAlerts.slice(0, 3).map((alert, index) => (
-              <li key={index}><strong>{alert.user}</strong> triggered anomaly with risk score <strong>{alert.score}</strong> – {alert.message}</li>
+              <li key={index}><strong>{alert.user}</strong> triggered anomaly with score <strong>{alert.score}</strong> – {alert.message}</li>
             ))}
           </ul>
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 m-4 mb-8">
         <StatCard label="📋 Total Logs" value={totalLogs} color="blue" />
         <StatCard label="🛑 Flagged Users" value={suspiciousLogs} color="yellow" />
         <StatCard label="🚨 Active Alerts" value={numberOfOpenAlerts} color="red" />
       </div>
 
-      {/*<div className="mb-4 flex justify-end">*/}
-      {/*  <button*/}
-      {/*    onClick={() => setBarMode(prev => (prev === 'score' ? 'count' : 'score'))}*/}
-      {/*    className="bg-gray-800 text-white px-4 py-2 rounded hover:bg-gray-700"*/}
-      {/*  >*/}
-      {/*    Toggle to {barMode === 'score' ? 'Suspicious Count' : 'Threat Score'}*/}
-      {/*  </button>*/}
-      {/*</div>*/}
+
+      <div className="p-4 bg-[#4E2926]">
+        <DateFilter
+          startDate={startDate}
+          setStartDate={setStartDate}
+          endDate={endDate}
+          setEndDate={setEndDate}
+          onRefresh={fetchLogsAndAlertsFromServer}
+        />
 
 
+        {/*<div className="flex flex-col p-3 md:flex-row items-center gap-4 ">*/}
+        {/*  <div className="flex items-center gap-2">*/}
+        {/*    <label htmlFor="start" className="font-semibold">From:</label>*/}
+        {/*    <input*/}
+        {/*      type="date"*/}
+        {/*      id="start"*/}
+        {/*      className="bg-[#4a2f2c] border border-[#3d2d28] rounded px-2 py-1 text-white"*/}
+        {/*      value={startDate}*/}
+        {/*      onChange={(e) => setStartDate(e.target.value)}*/}
+        {/*    />*/}
+        {/*  </div>*/}
+
+        {/*  <div className="flex items-center gap-2">*/}
+        {/*    <label htmlFor="end" className="font-semibold">To:</label>*/}
+        {/*    <input*/}
+        {/*      type="date"*/}
+        {/*      id="end"*/}
+        {/*      className="bg-[#2a1b17] border border-[#3d2d28] rounded px-2 py-1 text-white"*/}
+        {/*      value={endDate}*/}
+        {/*      onChange={(e) => setEndDate(e.target.value)}*/}
+        {/*    />*/}
+        {/*  </div>*/}
+
+        {/*  <button*/}
+        {/*    onClick={fetchLogsAndAlertsFromServer}*/}
+        {/*    className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-full"*/}
+        {/*  >*/}
+        {/*    🔄 Refresh Dashboard*/}
+        {/*  </button>*/}
+        {/*</div>*/}
 
       <DashboardCharts
-        labels={hourLabels}
-        data={hourScores}
+        alertPoints={alertPoints}
         pieData={{ labels: pieLabels, values: pieCounts }}
         barData={{ labels: barLabels, values: barMode === 'score' ? barScores : barCounts }}
         barMode={barMode}
         setBarMode={setBarMode}
         topThreatUsers={topThreatUsers}
-        hourDetails={hourDetails}
         groupBy={groupBy}
       />
-
     </div>
+
+      </div>
+
+
   );
 }
 
 function StatCard({ label, value, color }) {
   const colors = {
-    blue: 'text-blue-700',
-    yellow: 'text-yellow-600',
-    red: 'text-red-600',
+    blue: 'text-blue-400',
+    yellow: 'text-yellow-400',
+    red: 'text-red-400',
   };
   return (
-    <div className="bg-white p-4 rounded-lg shadow border text-center">
-      <h3 className="text-gray-700 font-bold text-lg">{label}</h3>
+    <div className="bg-[#6e5751] p-4 rounded-lg shadow border border-[#3d2d28] text-center">
+      <h3 className="text-white font-bold text-lg">{label}</h3>
       <p className={`text-3xl ${colors[color]}`}>{value}</p>
     </div>
   );
 }
 
 export default RealTimeInsiderThreatDashboardComponent;
-
 
 
 
