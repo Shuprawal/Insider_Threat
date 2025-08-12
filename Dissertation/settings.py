@@ -34,7 +34,7 @@ SECRET_KEY = os.getenv('SECRET_KEY')
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv('DEBUG')
 
-ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "").split(",")
+ALLOWED_HOSTS = [h for h in os.getenv("ALLOWED_HOSTS", "").split(",") if h]
 
 # Authentication settings
 LOGIN_URL = '/login/'
@@ -47,10 +47,11 @@ INSTALLED_APPS = [
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
+    "ThreatDetection.apps.ThreatDetectionConfig",
     # 'django.contrib.messages',
     # 'django.contrib.staticfiles',
     'corsheaders',
-    'ThreatDetection',
+    # 'ThreatDetection',
     'rest_framework',
     'channels',
     'src.dashboard',
@@ -73,7 +74,9 @@ REST_FRAMEWORK = {
 
 AUTH_USER_MODEL = 'ThreatDetection.CustomUser'
 
-ASGI_APPLICATION = 'Dissertation.asgi.application',
+# ASGI_APPLICATION = 'Dissertation.asgi.application',
+ASGI_APPLICATION = 'Dissertation.asgi.application'
+
 
 
 
@@ -83,6 +86,7 @@ MIDDLEWARE = [
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
+
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
@@ -156,6 +160,27 @@ STATIC_ROOT = BASE_DIR / 'staticfiles'
 # https://docs.djangoproject.com/en/4.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+
+
+EMAIL_HOST = os.getenv('EMAIL_HOST')
+EMAIL_PORT = int(os.getenv('EMAIL_PORT', 587))
+EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'True') == 'True'
+EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER')
+EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD')
+DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL')
+SIGNUP_ACTIVATION_TIMEOUT_SECONDS = int(os.getenv("SIGNUP_ACTIVATION_TIMEOUT_SECONDS", "3600"))
+PASSWORD_RESET_TIMEOUT = SIGNUP_ACTIVATION_TIMEOUT_SECONDS
+
+CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL', 'redis://localhost:6379/0')
+
+# optional result backend
+CELERY_RESULT_BACKEND = "redis://localhost:6379/1"
+
+CELERY_WORKER_POOL = "solo"
+
+
 
 CHANNEL_LAYERS = {
     "default": {

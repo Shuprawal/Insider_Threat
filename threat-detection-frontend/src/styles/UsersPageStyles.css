@@ -1,0 +1,247 @@
+/* --- Background and global text --- */
+.userspage-root {
+  min-height: 100vh;
+  background: #502414;
+  color: #fff;
+  font-family: 'Inter', Arial, sans-serif;
+}
+
+.userspage-container {
+  padding: 1.5rem;
+}
+
+/* --- Header --- */
+.userspage-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.userspage-title {
+  font-size: 2rem;
+  font-weight: bold;
+  text-align: center;
+  width: 100%;
+  margin-bottom: 1.5rem;
+}
+
+.userspage-title-highlight {
+  color: orange;
+}
+
+.userspage-suspend-btn {
+  padding: 0.5rem 1.2rem;
+  border-radius: 0.375rem;
+  font-weight: 600;
+  background: #f97316;
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.userspage-suspend-btn:hover {
+  background: #ea580c;
+}
+
+.userspage-suspend-btn.suspended {
+  background: #222;
+}
+
+/* --- Controls (Search & Sort) --- */
+.userspage-controls {
+  display: flex;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.userspage-search,
+.userspage-sort {
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.375rem;
+  background: #1a0e0b;
+  color: #fff;
+  border: 1px solid #555;
+  font-size: 1rem;
+}
+
+.userspage-search:focus,
+.userspage-sort:focus {
+  outline: 2px solid #f97316;
+}
+
+/* --- Empty/No users message --- */
+.userspage-empty {
+  text-align: center;
+  font-size: 1.125rem;
+  font-weight: 600;
+  padding: 3rem 0;
+  color: #b0a8a8;
+}
+
+/* --- Table --- */
+.userspage-table-wrap {
+  border-radius: 1rem;
+  overflow: visible;
+  box-shadow: 0 4px 24px 0 rgba(0,0,0,0.08);
+  border: 1px solid #4c4444;
+  margin-bottom: 1rem;
+}
+
+.userspage-table {
+  width: 100%;
+  background: #1a0e0b;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.userspage-table-header-row {
+  background: #2e241a;
+  color: #fff;
+  font-size: 0.92rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.userspage-table-header-row th {
+  padding: 0.8rem 1rem;
+  text-align: left;
+}
+
+.userspage-table-row {
+  border-top: 1px solid #3f455c;
+  transition: background 0.2s;
+}
+
+.userspage-table-row:hover {
+  background: #3B302D;
+}
+
+.suspended-row {
+  opacity: 0.6;
+}
+
+/* --- User cell --- */
+.userspage-usercell {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.7rem 1rem;
+}
+
+.userspage-usericon {
+  font-size: 1.5rem;
+  margin-right: 0.15rem;
+}
+
+/* --- Table cell padding --- */
+.userspage-table td, .userspage-table th {
+  padding: 0.75rem 1rem;
+}
+
+/* --- View (eye icon) --- */
+.userspage-viewbtn {
+  color: #bbb;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0.15rem 0.5rem;
+  transition: color 0.2s;
+}
+
+.userspage-viewbtn:hover {
+  color: #fff;
+}
+
+/* --- Actions dropdown --- */
+.userspage-actions-cell {
+  position: relative;
+}
+
+.userspage-actions-toggle {
+  background: none;
+  border: none;
+  color: #bbb;
+  font-size: 1.4rem;
+  cursor: pointer;
+  transition: color 0.2s;
+  padding: 0.1rem 0.5rem;
+}
+
+.userspage-actions-toggle:hover {
+  color: #fff;
+}
+
+.userspage-actions-dropdown {
+  position: absolute;
+  right: 0;
+  top: 2.2rem;
+  background: #2a2f45;
+  color: #fff;
+  border-radius: 0.5rem;
+  box-shadow: 0 4px 12px rgba(30,22,50,0.16);
+  z-index: 50;
+  width: 8rem;
+  min-width: 120px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.dropdown-btn {
+  padding: 0.5rem 1rem;
+  border: none;
+  background: none;
+  color: inherit;
+  text-align: left;
+  font-size: 0.98rem;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.dropdown-btn.edit-btn:hover {
+  background: #3a3f5a;
+}
+
+.dropdown-btn.delete-btn:hover {
+  background: #d90429;
+  color: #fff;
+}
+
+.dropdown-btn.suspend-btn:hover {
+  background: #fbbf24;
+  color: #1a0e0b;
+}
+
+/* --- Pagination --- */
+.userspage-pagination {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 2rem;
+}
+
+.pagination-btn {
+  background: #3a3f5a;
+  color: #fff;
+  padding: 0.45rem 1.1rem;
+  border: none;
+  border-radius: 0.35rem;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: background 0.2s, opacity 0.2s;
+}
+
+.pagination-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.pagination-btn:hover:not(:disabled) {
+  background: #4a516c;
+}
+
+.pagination-info {
+  font-size: 0.95rem;
+  color: #d3d3d3;
+}

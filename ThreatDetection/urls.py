@@ -6,7 +6,7 @@ from .views import *
 
 urlpatterns = [
     path('custom-login/', views.custom_login),
-    path('custom-register/', views.custom_register),
+    # path('custom-register/', views.custom_register),
     # path('logs/create/', views.custom_log_create),
     path('logs/list/', views.custom_log_list),
     path('users/', views.user_list),

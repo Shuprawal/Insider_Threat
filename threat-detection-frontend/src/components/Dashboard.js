@@ -2,8 +2,13 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import DashboardCharts from './DashboardCharts';
-import Navbar from "./Navbar";
-import DateFilter from "./Date";
+import Navbar from './Navbar';
+import DateFilter from './Date';
+import '../App.css'; //
+import SiteFooter from './SiteFooter';
+
+
+
 
 function RealTimeInsiderThreatDashboardComponent({ setAuth }) {
   const [arrayOfSystemUserLogs, setArrayOfSystemUserLogs] = useState([]);
@@ -22,7 +27,7 @@ function RealTimeInsiderThreatDashboardComponent({ setAuth }) {
   const [barCounts, setBarCounts] = useState([]);
   const [barMode, setBarMode] = useState('score');
 
-  const navigationToOtherPages = useNavigate();
+  const navigate = useNavigate();
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
 
@@ -53,7 +58,6 @@ function RealTimeInsiderThreatDashboardComponent({ setAuth }) {
       setBarCounts(chartRes.data.barCounts || []);
       setBarScores(chartRes.data.barScores || []);
       setGroupBy(chartRes.data.groupBy || 'hour');
-
     } catch (error) {
       setErrorMessageOnDashboard('🚨 Failed to retrieve data. Please refresh.');
       console.error('Error:', error);
@@ -68,7 +72,7 @@ function RealTimeInsiderThreatDashboardComponent({ setAuth }) {
     setEndDate(today);
     fetchLogsAndAlertsFromServer();
 
-    const token = localStorage.getItem("custom_token");
+    const token = localStorage.getItem('custom_token');
     const socket = new WebSocket(`ws://localhost:8000/ws/threats/?token=${token}`);
 
     socket.onmessage = (event) => {
@@ -81,120 +85,90 @@ function RealTimeInsiderThreatDashboardComponent({ setAuth }) {
             timestamp: new Date().toISOString(),
             is_suspicious: true,
           };
-          setArrayOfSystemUserLogs(prev => [newLog, ...prev]);
-          setRealTimeThreatAlerts(prev => [data, ...prev]);
+          setArrayOfSystemUserLogs((prev) => [newLog, ...prev]);
+          setRealTimeThreatAlerts((prev) => [data, ...prev]);
         }
       } catch (err) {
         console.error('WebSocket message error:', err);
       }
     };
 
-    socket.onerror = err => console.warn('WebSocket error:', err);
+    socket.onerror = (err) => console.warn('WebSocket error:', err);
     return () => socket.close();
   }, []);
 
   const totalLogs = arrayOfSystemUserLogs.length;
-  const suspiciousLogs = arrayOfSystemUserLogs.filter(log => log.is_suspicious).length;
+  const suspiciousLogs = arrayOfSystemUserLogs.filter((log) => log.is_suspicious).length;
 
   return (
-    <div className="min-h-screen bg-[#502414] text-white font-sans">
+    <div className="imdash-page">
       <Navbar setAuth={setAuth} />
 
-
       {realTimeThreatAlerts.length > 0 && (
-        <div className="bg-red-100 border-l-8 border-red-600 text-red-800 p-4 mb-6 rounded-xl shadow">
-          <h2 className="text-lg font-bold mb-2">⚠️ Real-Time Threat Alert</h2>
-          <ul className="list-disc pl-5 space-y-1">
-            {realTimeThreatAlerts.slice(0, 3).map((alert, index) => (
-              <li key={index}><strong>{alert.user}</strong> triggered anomaly with score <strong>{alert.score}</strong> – {alert.message}</li>
+        <div className="imdash-realtime-banner">
+          <h2 className="imdash-realtime-title">⚠️ Real-Time Threat Alert</h2>
+          <ul className="imdash-realtime-list">
+            {realTimeThreatAlerts.slice(0, 3).map((alert, idx) => (
+              <li key={idx}>
+                <strong>{alert.user}</strong> triggered anomaly with score <strong>{alert.score}</strong> — {alert.message}
+              </li>
             ))}
           </ul>
         </div>
       )}
 
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 m-4 mb-8">
-        <StatCard label="📋 Total Logs" value={totalLogs} color="blue" />
-        <StatCard label="🛑 Flagged Users" value={suspiciousLogs} color="yellow" />
-        <StatCard label="🚨 Active Alerts" value={numberOfOpenAlerts} color="red" />
+      <div className="imdash-kpi-grid">
+        <StatCard label="📋 Total Logs" value={totalLogs} tone="info" />
+        <StatCard label="🛑 Flagged Users" value={suspiciousLogs} tone="warn" />
+        <StatCard label="🚨 Active Alerts" value={numberOfOpenAlerts} tone="danger" />
       </div>
 
+      <section className="imdash-panel">
+        <div className="imdash-filter-row">
+          <DateFilter
+            startDate={startDate}
+            setStartDate={setStartDate}
+            endDate={endDate}
+            setEndDate={setEndDate}
+            onRefresh={fetchLogsAndAlertsFromServer}
+          />
+        </div>
 
-      <div className="p-4 bg-[#4E2926]">
-        <DateFilter
-          startDate={startDate}
-          setStartDate={setStartDate}
-          endDate={endDate}
-          setEndDate={setEndDate}
-          onRefresh={fetchLogsAndAlertsFromServer}
+        <DashboardCharts
+          alertPoints={alertPoints}
+          pieData={{ labels: pieLabels, values: pieCounts }}
+          barData={{ labels: barLabels, values: barMode === 'score' ? barScores : barCounts }}
+          barMode={barMode}
+          setBarMode={setBarMode}
+          topThreatUsers={topThreatUsers}
+          groupBy={groupBy}
         />
+      </section>
+        <SiteFooter />
 
 
-        {/*<div className="flex flex-col p-3 md:flex-row items-center gap-4 ">*/}
-        {/*  <div className="flex items-center gap-2">*/}
-        {/*    <label htmlFor="start" className="font-semibold">From:</label>*/}
-        {/*    <input*/}
-        {/*      type="date"*/}
-        {/*      id="start"*/}
-        {/*      className="bg-[#4a2f2c] border border-[#3d2d28] rounded px-2 py-1 text-white"*/}
-        {/*      value={startDate}*/}
-        {/*      onChange={(e) => setStartDate(e.target.value)}*/}
-        {/*    />*/}
-        {/*  </div>*/}
 
-        {/*  <div className="flex items-center gap-2">*/}
-        {/*    <label htmlFor="end" className="font-semibold">To:</label>*/}
-        {/*    <input*/}
-        {/*      type="date"*/}
-        {/*      id="end"*/}
-        {/*      className="bg-[#2a1b17] border border-[#3d2d28] rounded px-2 py-1 text-white"*/}
-        {/*      value={endDate}*/}
-        {/*      onChange={(e) => setEndDate(e.target.value)}*/}
-        {/*    />*/}
-        {/*  </div>*/}
 
-        {/*  <button*/}
-        {/*    onClick={fetchLogsAndAlertsFromServer}*/}
-        {/*    className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-full"*/}
-        {/*  >*/}
-        {/*    🔄 Refresh Dashboard*/}
-        {/*  </button>*/}
-        {/*</div>*/}
-
-      <DashboardCharts
-        alertPoints={alertPoints}
-        pieData={{ labels: pieLabels, values: pieCounts }}
-        barData={{ labels: barLabels, values: barMode === 'score' ? barScores : barCounts }}
-        barMode={barMode}
-        setBarMode={setBarMode}
-        topThreatUsers={topThreatUsers}
-        groupBy={groupBy}
-      />
     </div>
-
-      </div>
-
 
   );
 }
 
-function StatCard({ label, value, color }) {
-  const colors = {
-    blue: 'text-blue-400',
-    yellow: 'text-yellow-400',
-    red: 'text-red-400',
-  };
+function StatCard({ label, value, tone }) {
+  const toneClass =
+    tone === 'info' ? 'imdash-kpi--info' : tone === 'warn' ? 'imdash-kpi--warn' : 'imdash-kpi--danger';
   return (
-    <div className="bg-[#6e5751] p-4 rounded-lg shadow border border-[#3d2d28] text-center">
-      <h3 className="text-white font-bold text-lg">{label}</h3>
-      <p className={`text-3xl ${colors[color]}`}>{value}</p>
+    <div className={`imdash-kpi-card ${toneClass}`}>
+      <h3 className="imdash-kpi-label">{label}</h3>
+      <p className="imdash-kpi-value">{value}</p>
     </div>
+
   );
 }
+
+
 
 export default RealTimeInsiderThreatDashboardComponent;
-
-
 
 
 

@@ -19,6 +19,12 @@ class CustomUserManager(BaseUserManager):
 
 class CustomUser(AbstractBaseUser, PermissionsMixin):
     id = models.AutoField(primary_key=True)
+
+    first_name = models.CharField(max_length=30, blank=True)
+    last_name = models.CharField(max_length=30, blank=True)
+    address = models.CharField(max_length=255, blank=True)
+    profile_picture = models.ImageField(upload_to='profile_pics/', blank=True, null=True)
+
     email = models.EmailField(unique=True, blank=False, null=False)
     username = models.CharField(max_length=150, unique=True)
     password = models.CharField(max_length=256)
@@ -27,6 +33,7 @@ class CustomUser(AbstractBaseUser, PermissionsMixin):
     created_at = models.DateTimeField(auto_now_add=True)
     failed_login_timestamp = models.DateTimeField(null=True, blank=True)
     is_suspended = models.BooleanField(default=False)
+    is_active = models.BooleanField(default=False)
 
     objects = CustomUserManager()
 
@@ -91,3 +98,66 @@ class AuditLogs(models.Model):
 
     def __str__(self):
         return f"{self.action} by {self.admin_user} on {self.timestamp}"
+
+
+class UserDailyAgg(models.Model):
+    """
+    One row per user per calendar day of aggregated behavior.
+    Used for real-time scoring & cold-start handling.
+    """
+    user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, db_index=True)
+    day = models.DateField(db_index=True)
+
+    number_of_emails_dispatched = models.IntegerField(default=0)
+    number_of_files_interacted = models.IntegerField(default=0)
+    total_logon_attempts = models.IntegerField(default=0)
+    usb_connection_incidents = models.IntegerField(default=0)
+    nighttime_email_events = models.IntegerField(default=0)
+    number_of_night_logons = models.IntegerField(default=0)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('user', 'day')
+
+    def __str__(self):
+        return f"{self.user.username} - {self.day}"
+
+
+class CohortBaseline(models.Model):
+    cohort_role = models.CharField(max_length=50, blank=True, db_index=True)
+    cohort_department = models.CharField(max_length=100, blank=True, db_index=True)
+    feature_name = models.CharField(max_length=100, db_index=True)
+
+    # robust stats
+    median = models.FloatField(default=0.0)
+    mad = models.FloatField(default=0.0)
+
+    # rolling/summary stats (these are what rebuild_cohort is writing)
+    mean_7d  = models.FloatField(default=0.0)
+    std_7d   = models.FloatField(default=0.0)
+    mean_14d = models.FloatField(default=0.0)
+    std_14d  = models.FloatField(default=0.0)
+    mean_30d = models.FloatField(default=0.0)
+    std_30d  = models.FloatField(default=0.0)
+
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ('cohort_role', 'cohort_department', 'feature_name')
+
+
+class ModelConfig(models.Model):
+    """
+    Stores trained model path and scoring thresholds.
+    """
+    name = models.CharField(max_length=100, default='daily_xgb', unique=True)
+    bundle_path = models.CharField(max_length=255)
+    decision_threshold = models.FloatField(default=0.9)
+    alert_rate = models.FloatField(default=0.001)
+    trained_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.name
+
+

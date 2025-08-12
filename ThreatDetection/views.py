@@ -518,31 +518,39 @@ def custom_login(request):
     # return JsonResponse({'error': 'Only POST allowed'}, status=405)
 
 #  Custom Register
-@csrf_exempt
-def custom_register(request):
-    if request.method == 'POST':
-        try:
-            data = json.loads(request.body)
-            username = data.get('username')
-            password = data.get('password')
-            department = data.get('department', '')
-            role = data.get('role', 'employee')
-
-            if CustomUser.objects.filter(username=username).exists():
-                return JsonResponse({'error': 'User already exists'}, status=400)
-
-            user = CustomUser(
-                username=username,
-                department=department,
-                role=role
-            )
-            user.set_password(password)
-            user.save()
-            return JsonResponse({'success': True})
-        except Exception as e:
-            print("❌ Registration error:", str(e))  # optional debug
-            return JsonResponse({'error': str(e)}, status=400)
-    return JsonResponse({'error': 'Only POST allowed'}, status=405)
+# @csrf_exempt
+# def custom_register(request):
+#     if request.method == 'POST':
+#         try:
+#             data = json.loads(request.body)
+#             username = data.get('username')
+#             email = data.get('email')
+#             password = data.get('password')
+#             department = data.get('department', '')
+#             role = data.get('role', 'employee')
+#
+#             if not email:
+#                 return JsonResponse({'error': 'Email is required'}, status=400)
+#
+#             # Check for unique email
+#             if CustomUser.objects.filter(email=email).exists():
+#                 return JsonResponse({'error': 'Email already registered'}, status=400)
+#             if CustomUser.objects.filter(username=username).exists():
+#                 return JsonResponse({'error': 'User already exists'}, status=400)
+#
+#             user = CustomUser(
+#                 username=username,
+#                 email=email,  # Add email here
+#                 department=department,
+#                 role=role
+#             )
+#             user.set_password(password)
+#             user.save()
+#             return JsonResponse({'success': True})
+#         except Exception as e:
+#             print("❌ Registration error:", str(e))  # optional debug
+#             return JsonResponse({'error': str(e)}, status=400)
+#     return JsonResponse({'error': 'Only POST allowed'}, status=405)
 
 
 

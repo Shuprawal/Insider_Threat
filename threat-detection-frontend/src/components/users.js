@@ -3,6 +3,8 @@ import axios from 'axios';
 import Navbar from "./Navbar";
 import { FiEye } from 'react-icons/fi';
 import { useNavigate } from 'react-router-dom';
+import ConfirmModal from './ConfirmModal';
+import '../styles/UsersPageStyles.css';
 
 function UsersPage() {
   const [users, setUsers] = useState([]);
@@ -13,6 +15,10 @@ function UsersPage() {
   const [dropdownOpenId, setDropdownOpenId] = useState(null);
   const [showSuspended, setShowSuspended] = useState(false);
 
+  const [modalMessage, setModalMessage] = useState('');
+  const [showModal, setShowModal] = useState(false);
+  const [modalAction, setModalAction] = useState(() => {});
+
   const navigate = useNavigate();
 
   const fetchUsers = async () => {
@@ -20,12 +26,7 @@ function UsersPage() {
       const token = localStorage.getItem('custom_token');
       const res = await axios.get('http://localhost:8000/api/users/view/', {
         headers: { Authorization: `Bearer ${token}` },
-        params: {
-          search,
-          sort,
-          page,
-          suspended: showSuspended ? 'true' : 'false',
-        },
+        params: { search, sort, page, suspended: showSuspended ? 'true' : 'false' },
       });
       setUsers(res.data.users);
       setTotalPages(res.data.total_pages);
@@ -42,7 +43,7 @@ function UsersPage() {
       }, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      fetchUsers(); // Refresh list
+      fetchUsers();
     } catch (err) {
       console.error('Failed to update suspension:', err);
     }
@@ -52,46 +53,32 @@ function UsersPage() {
     if (!value) localStorage.removeItem("custom_token");
   };
 
-  useEffect(() => {
-    fetchUsers();
-  }, [search, sort, page, showSuspended]);
+  useEffect(() => { fetchUsers(); }, [search, sort, page, showSuspended]);
 
   return (
-    <div className="min-h-screen bg-[#502414] text-white">
+   <div className="userspage-root">
       <Navbar setAuth={setAuth} />
-      <div className="p-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-2xl w-full text-center font-bold mb-6">
-            User <span className="text-orange-400">List</span>
+      <div className="userspage-container">
+        <div className="userspage-header">
+          <h2 className="userspage-title">
+            User <span className="userspage-title-highlight">List</span>
           </h2>
-
           <button
-            className={`px-4 py-2 rounded-md font-semibold text-white transition ${
-              showSuspended
-                ? 'bg-green-600 hover:bg-green-700'
-                : 'bg-orange-500 hover:bg-orange-600'
-            }`}
-            onClick={() => {
-              setShowSuspended(prev => !prev);
-              setPage(1); // Reset page
-            }}
+            className={`userspage-suspend-btn${showSuspended ? ' suspended' : ''}`}
+            onClick={() => { setShowSuspended(prev => !prev); setPage(1); }}
           >
             {showSuspended ? 'Show Active' : 'Suspended'}
           </button>
         </div>
-
-        <div className="flex gap-3 mb-4">
+        <div className="userspage-controls">
           <input
-            type="text"
-            value={search}
-            placeholder="Search users..."
+            type="text" value={search} placeholder="Search users..."
             onChange={(e) => setSearch(e.target.value)}
-            className="px-3 py-2 rounded bg-[#1a0e0b] text-white border border-gray-600"
+            className="userspage-search"
           />
           <select
-            value={sort}
-            onChange={(e) => setSort(e.target.value)}
-            className="px-3 py-2 rounded bg-[#1a0e0b] text-white border border-gray-600"
+            value={sort} onChange={(e) => setSort(e.target.value)}
+            className="userspage-sort"
           >
             <option value="a-z">A–Z</option>
             <option value="z-a">Z–A</option>
@@ -99,98 +86,105 @@ function UsersPage() {
             <option value="most-threats">Most Threats</option>
           </select>
         </div>
-
-        <div className="rounded-xl overflow-hidden shadow-lg border border-[#4c4444]">
-          <table className="w-full bg-[#1a0e0b]">
-            <thead>
-              <tr className="text-left bg-[#2e241a] text-white text-sm uppercase tracking-wider">
-                <th className="p-3">Username</th>
-                <th className="p-3">Department</th>
-                <th className="p-3">Role</th>
-                <th className="p-3">Threats</th>
-                <th className="p-3">Created</th>
-                <th className="p-3">View</th>
-                <th className="p-3">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {users.map(user => (
-                <tr
-                  key={user.id}
-                  className={`hover:bg-[#3B302D] border-t border-[#3f455c] transition duration-200 ${
-                    (!showSuspended && user.is_suspended) ? 'opacity-60' : ''
-                  }`}
-                >
-                  <td className="p-3 flex items-center gap-3">
-                    <span className="text-2xl">👤</span>
-                    <span className="text-base">{user.username}</span>
-                  </td>
-                  <td className="p-3">{user.department}</td>
-                  <td className="p-3">{user.role}</td>
-                  <td className="p-3">{user.threat_count}</td>
-                  <td className="p-3">{user.created_at}</td>
-                  <td className="p-3">
-                    <button
-                      onClick={() => navigate(`/users/${user.id}`)}
-                      className="text-gray-300 hover:text-white"
-                      title="View Details"
-                    >
-                      <FiEye size={20} />
-                    </button>
-                  </td>
-                  <td className="p-3 relative">
-                    <button
-                      onClick={() =>
-                        setDropdownOpenId(dropdownOpenId === user.id ? null : user.id)
-                      }
-                      className="text-gray-300 hover:text-white text-xl"
-                    >
-                      ⋮
-                    </button>
-
-                    {dropdownOpenId === user.id && (
-                      <div className="absolute right-0 top-8 bg-[#2a2f45] text-white rounded shadow-lg z-20 w-32">
-                        <button className="px-4 py-2 hover:bg-[#3a3f5a] text-sm w-full text-left">
-                          Edit
-                        </button>
-                        <button className="px-4 py-2 hover:bg-red-600 text-sm w-full text-left">
-                          Delete
-                        </button>
-                        <button
-                          className="px-4 py-2 hover:bg-yellow-600 text-sm w-full text-left"
-                          onClick={() => toggleSuspension(user.id, !user.is_suspended)}
-                        >
-                          {user.is_suspended ? 'Unsuspend' : 'Suspend'}
-                        </button>
-                      </div>
-                    )}
-                  </td>
+        {users.length === 0 ? (
+          <div className="userspage-empty">
+            {showSuspended ? 'No suspended users found.' : 'No users have registered.'}
+          </div>
+        ) : (
+          <div className="userspage-table-wrap">
+            <table className="userspage-table">
+              <thead>
+                <tr className="userspage-table-header-row">
+                    <th>SN</th>
+                  <th>Username</th>
+                  <th>Department</th>
+                  <th>Role</th>
+                  <th>Threats</th>
+                  <th>Created</th>
+                  <th>View</th>
+                  <th>Actions</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="flex justify-between items-center mt-6">
+              </thead>
+              <tbody>
+                {users.map((user,index) => (
+                  <tr key={user.id} className={`userspage-table-row${(!showSuspended && user.is_suspended) ? ' suspended-row' : ''}`}>
+                      <td>{ index + 1 }</td>
+                    <td className="userspage-usercell">
+                      <span className="userspage-usericon">👤</span>
+                      <span>{user.username}</span>
+                    </td>
+                    <td>{user.department}</td>
+                    <td>{user.role}</td>
+                    <td>{user.threat_count}</td>
+                    <td>{user.created_at}</td>
+                    <td>
+                      <button
+                        onClick={() => navigate(`/users/${user.id}`)}
+                        className="userspage-viewbtn"
+                        title="View Details"
+                      >
+                        <FiEye size={20} />
+                      </button>
+                    </td>
+                    <td className="userspage-actions-cell">
+                      <button
+                        onClick={() => setDropdownOpenId(dropdownOpenId === user.id ? null : user.id)}
+                        className="userspage-actions-toggle"
+                      >
+                        ⋮
+                      </button>
+                      {dropdownOpenId === user.id && (
+                        <div className="userspage-actions-dropdown">
+                          <button className="dropdown-btn edit-btn">Edit</button>
+                          <button className="dropdown-btn delete-btn">Delete</button>
+                          <button
+                            className="dropdown-btn suspend-btn"
+                            onClick={() => {
+                              setModalMessage(`Are you sure you want to ${user.is_suspended ? 'unsuspend' : 'suspend'} this user?`);
+                              setModalAction(() => () => toggleSuspension(user.id, !user.is_suspended));
+                              setShowModal(true);
+                            }}
+                          >
+                            {user.is_suspended ? 'Unsuspend' : 'Suspend'}
+                          </button>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <div className="userspage-pagination">
           <button
             disabled={page <= 1}
             onClick={() => setPage(page - 1)}
-            className="bg-[#3a3f5a] px-4 py-2 rounded hover:bg-[#4a516c] disabled:opacity-40"
+            className="pagination-btn"
           >
             ⬅ Prev
           </button>
-          <span className="text-sm text-gray-300">
+          <span className="pagination-info">
             Page {page} of {totalPages}
           </span>
           <button
             disabled={page >= totalPages}
             onClick={() => setPage(page + 1)}
-            className="bg-[#3a3f5a] px-4 py-2 rounded hover:bg-[#4a516c] disabled:opacity-40"
+            className="pagination-btn"
           >
-            Next ➡
+            Next ➔
           </button>
         </div>
       </div>
+      {showModal && (
+        <ConfirmModal
+          message={modalMessage}
+          onConfirm={() => { modalAction(); setShowModal(false); }}
+          onCancel={() => setShowModal(false)}
+          confirmText="Yes"
+          cancelText="Cancel"
+        />
+      )}
     </div>
   );
 }

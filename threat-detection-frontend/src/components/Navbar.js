@@ -1,61 +1,150 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+// import './navbar.css';
+import '../App.css'
 
 function Navbar({ setAuth }) {
   const location = useLocation();
   const navigate = useNavigate();
 
+  const [mobileOpen, setMobileOpen] = useState(false);
+
+  // Theme (persist + respect OS on first load)
+  const getInitialTheme = () => {
+    const saved = localStorage.getItem('im_theme');
+    if (saved) return saved;
+    return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+      ? 'dark'
+      : 'light';
+  };
+  const [theme, setTheme] = useState(getInitialTheme);
+
+ useEffect(() => {
+  localStorage.setItem('im_theme', theme);
+  const root = document.documentElement;
+  root.classList.remove('im-theme-dark', 'im-theme-light');
+  root.classList.add(theme === 'dark' ? 'im-theme-dark' : 'im-theme-light');
+
+  // NEW: tell the app the theme changed (charts can re-read CSS variables)
+  window.dispatchEvent(new CustomEvent('im-theme-changed', { detail: { theme } }));
+}, [theme]);
+
+  // Close drawer on route change
+  useEffect(() => setMobileOpen(false), [location.pathname]);
+
   const isActive = (path) => location.pathname === path;
 
-  const navLinkStyle = (path) =>
-    `${isActive(path) ? 'text-white font-semibold' : 'text-gray-400 hover:text-white'} px-4 py-2 transition`;
+  const go = (path) => {
+    navigate(path);
+    setMobileOpen(false);
+  };
+
+  const onLogout = () => {
+    localStorage.removeItem('custom_token');
+    setAuth(false);
+    navigate('/login');
+  };
 
   return (
-    <nav className=" text-white px-4 py-3  sticky top-0 z-50">
-      <div className="max-w-7xl mx-auto flex items-center justify-between rounded-full px-6 py-3 bg-[#1a0e0b] border border-[#3d2d28] shadow-xl">
+    <nav className="im-nav">
+      <div className="im-nav__shell">
+        {/* Left: brand + hamburger (mobile) */}
+        <div className="im-nav__left">
+          <button
+            className="im-nav__hamburger"
+            aria-label="Open menu"
+            aria-expanded={mobileOpen}
+            aria-controls="im-mobile-drawer"
+            onClick={() => setMobileOpen((o) => !o)}
+          >
+            <span />
+            <span />
+            <span />
+          </button>
 
-        {/* Left Nav Links */}
-        <div className="flex gap-4 items-center">
-          <button onClick={() => navigate('/')} className={navLinkStyle('/')}>
+          <div
+            className="im-brand"
+            onClick={() => go('/')}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => e.key === 'Enter' && go('/')}
+          >
+            <span className="im-brand__main">Insider</span>
+            <span className="im-brand__accent">Monitor</span>
+          </div>
+        </div>
+
+        {/* Center: desktop links */}
+        <div className="im-nav__links">
+          <button className={`im-nav__link ${isActive('/') ? 'is-active' : ''}`} onClick={() => go('/')}>
             Dashboard
           </button>
-          <button onClick={() => navigate('/users')} className={navLinkStyle('/users')}>
+          <button className={`im-nav__link ${isActive('/users') ? 'is-active' : ''}`} onClick={() => go('/users')}>
             Users
           </button>
-          <button onClick={() => navigate('/alerts')} className={navLinkStyle('/alerts')}>
+          <button className={`im-nav__link ${isActive('/alerts') ? 'is-active' : ''}`} onClick={() => go('/alerts')}>
             Alerts
           </button>
-          <button onClick={() => navigate('/analyze')} className={navLinkStyle('/analyze')}>
+          <button className={`im-nav__link ${isActive('/analyze') ? 'is-active' : ''}`} onClick={() => go('/analyze')}>
             Analyze
           </button>
         </div>
 
-        {/* Center Logo */}
-        <div className="text-white text-2xl font-extrabold tracking-wider cursor-pointer" onClick={() => navigate('/')}>
-          Insider<span className="text-orange-400">Monitor</span>
-        </div>
-
-        {/* Right Buttons */}
-        <div className="flex gap-3 items-center">
-          <button
-            onClick={() => navigate('/log')}
-            className="bg-white text-black hover:bg-gray-200 px-4 py-2 rounded-full font-semibold transition"
-          >
+        {/* Right: actions (desktop) + theme toggle */}
+        <div className="im-nav__actions">
+          <button onClick={() => go('/log')} className="im-btn im-btn--light im-hide-mobile">
             + Log
           </button>
-          <button
-            onClick={() => {
-              localStorage.removeItem('custom_token');
-              setAuth(false);
-              navigate('/login');
-            }}
-            className="bg-orange-500 hover:bg-orange-600 px-4 py-2 rounded-full font-semibold text-white transition"
-          >
+          <button onClick={onLogout} className="im-btn im-btn--alert im-hide-mobile">
             Logout
           </button>
-        </div>
 
+          <button
+            onClick={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
+            className="im-toggle"
+            title="Toggle theme"
+            aria-label="Toggle theme"
+          >
+            <span className="im-toggle__thumb" data-mode={theme} />
+            <span className="im-toggle__label">{theme === 'dark' ? 'Dark' : 'Light'}</span>
+          </button>
+        </div>
       </div>
+
+      {/* Mobile drawer */}
+      <div
+        id="im-mobile-drawer"
+        className={`im-nav__drawer ${mobileOpen ? 'is-open' : ''}`}
+        role="dialog"
+        aria-modal="true"
+      >
+        <div className="im-nav__drawer-inner">
+          <button className={`im-nav__link ${isActive('/') ? 'is-active' : ''}`} onClick={() => go('/')}>
+            Dashboard
+          </button>
+          <button className={`im-nav__link ${isActive('/users') ? 'is-active' : ''}`} onClick={() => go('/users')}>
+            Users
+          </button>
+          <button className={`im-nav__link ${isActive('/alerts') ? 'is-active' : ''}`} onClick={() => go('/alerts')}>
+            Alerts
+          </button>
+          <button className={`im-nav__link ${isActive('/analyze') ? 'is-active' : ''}`} onClick={() => go('/analyze')}>
+            Analyze
+          </button>
+
+          <div className="im-nav__drawer-actions">
+            <button onClick={() => go('/log')} className="im-btn im-btn--light">
+              + Log
+            </button>
+            <button onClick={onLogout} className="im-btn im-btn--alert">
+              Logout
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Optional backdrop */}
+      {mobileOpen && <div className="im-nav__backdrop" onClick={() => setMobileOpen(false)} />}
     </nav>
   );
 }
