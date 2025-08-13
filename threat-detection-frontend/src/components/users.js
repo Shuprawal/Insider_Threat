@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import Navbar from "./Navbar";
 import { FiEye } from 'react-icons/fi';
 import { useNavigate } from 'react-router-dom';
 import ConfirmModal from './ConfirmModal';
 import '../styles/UsersPageStyles.css';
+import {getToken} from "./authStorage";
 
 function UsersPage() {
   const [users, setUsers] = useState([]);
@@ -23,7 +23,8 @@ function UsersPage() {
 
   const fetchUsers = async () => {
     try {
-      const token = localStorage.getItem('custom_token');
+      // const token = localStorage.getItem('custom_token');
+        const token = getToken()
       const res = await axios.get('http://localhost:8000/api/users/view/', {
         headers: { Authorization: `Bearer ${token}` },
         params: { search, sort, page, suspended: showSuspended ? 'true' : 'false' },
@@ -37,7 +38,8 @@ function UsersPage() {
 
   const toggleSuspension = async (userId, shouldSuspend) => {
     try {
-      const token = localStorage.getItem('custom_token');
+      // const token = localStorage.getItem('custom_token');
+        const token = getToken()
       await axios.put(`http://localhost:8000/api/users/${userId}/suspend/`, {
         is_suspended: shouldSuspend,
       }, {
@@ -57,7 +59,6 @@ function UsersPage() {
 
   return (
    <div className="userspage-root">
-      <Navbar setAuth={setAuth} />
       <div className="userspage-container">
         <div className="userspage-header">
           <h2 className="userspage-title">

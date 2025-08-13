@@ -1,15 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-// import './navbar.css';
-import '../App.css'
+import '../App.css';
+import { clearToken } from './authStorage'; // ✅ clears both localStorage + sessionStorage
 
-function Navbar({ setAuth }) {
+export default function Navbar({ setAuth }) {
   const location = useLocation();
   const navigate = useNavigate();
-
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  // Theme (persist + respect OS on first load)
+  // theme setup
   const getInitialTheme = () => {
     const saved = localStorage.getItem('im_theme');
     if (saved) return saved;
@@ -19,17 +18,15 @@ function Navbar({ setAuth }) {
   };
   const [theme, setTheme] = useState(getInitialTheme);
 
- useEffect(() => {
-  localStorage.setItem('im_theme', theme);
-  const root = document.documentElement;
-  root.classList.remove('im-theme-dark', 'im-theme-light');
-  root.classList.add(theme === 'dark' ? 'im-theme-dark' : 'im-theme-light');
+  useEffect(() => {
+    localStorage.setItem('im_theme', theme);
+    const root = document.documentElement;
+    root.classList.remove('im-theme-dark', 'im-theme-light');
+    root.classList.add(theme === 'dark' ? 'im-theme-dark' : 'im-theme-light');
+    window.dispatchEvent(new CustomEvent('im-theme-changed', { detail: { theme } }));
+  }, [theme]);
 
-  // NEW: tell the app the theme changed (charts can re-read CSS variables)
-  window.dispatchEvent(new CustomEvent('im-theme-changed', { detail: { theme } }));
-}, [theme]);
-
-  // Close drawer on route change
+  // close drawer on route change
   useEffect(() => setMobileOpen(false), [location.pathname]);
 
   const isActive = (path) => location.pathname === path;
@@ -40,15 +37,15 @@ function Navbar({ setAuth }) {
   };
 
   const onLogout = () => {
-    localStorage.removeItem('custom_token');
-    setAuth(false);
-    navigate('/login');
+    clearToken();            // ✅ storage-agnostic logout
+    setAuth?.(false);        // ✅ safe call only if provided
+    navigate('/login', { replace: true });
   };
 
   return (
     <nav className="im-nav">
       <div className="im-nav__shell">
-        {/* Left: brand + hamburger (mobile) */}
+        {/* Left: brand + hamburger */}
         <div className="im-nav__left">
           <button
             className="im-nav__hamburger"
@@ -90,7 +87,7 @@ function Navbar({ setAuth }) {
           </button>
         </div>
 
-        {/* Right: actions (desktop) + theme toggle */}
+        {/* Right: actions + theme toggle */}
         <div className="im-nav__actions">
           <button onClick={() => go('/log')} className="im-btn im-btn--light im-hide-mobile">
             + Log
@@ -143,10 +140,8 @@ function Navbar({ setAuth }) {
         </div>
       </div>
 
-      {/* Optional backdrop */}
+      {/* Backdrop */}
       {mobileOpen && <div className="im-nav__backdrop" onClick={() => setMobileOpen(false)} />}
     </nav>
   );
 }
-
-export default Navbar;

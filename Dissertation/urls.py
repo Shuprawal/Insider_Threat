@@ -14,11 +14,12 @@ Including another URLconf
     1. Import the include() function: from django.urls import include, path
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
-
+from django.contrib.staticfiles.urls import staticfiles_urlpatterns
 # from django.contrib import admin
 from django.urls import path, include
 from ThreatDetection import views
-
+from django.conf import settings
+from django.conf.urls.static import static
 
 from django.urls import path
 from rest_framework.authtoken.views import obtain_auth_token
@@ -33,3 +34,9 @@ urlpatterns = [
     path('api/',include('src.users.urls')),
 
 ]
+
+
+if settings.DEBUG:
+    urlpatterns += staticfiles_urlpatterns()
+    urlpatterns += static(settings.MEDIA_URL, document_root=getattr(settings, "MEDIA_ROOT", None))
+    urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)

@@ -161,3 +161,20 @@ class ModelConfig(models.Model):
         return self.name
 
 
+# app/models.py
+from django.conf import settings
+from django.db import models
+from django.utils import timezone
+
+class PasswordResetToken(models.Model):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='reset_tokens')
+    token = models.CharField(max_length=128, unique=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    used = models.BooleanField(default=False)
+
+    def is_expired(self):
+        return timezone.now() > self.expires_at
+
+    def __str__(self):
+        return f"ResetToken<{self.user_id}:{self.token[:8]}...>"

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
-import Navbar from './Navbar';
+
+import {getToken} from "./authStorage";
 
 function AlertsPage({ setAuth }) {
   const [alerts, setAlerts] = useState([]);
@@ -10,7 +11,8 @@ function AlertsPage({ setAuth }) {
   const fetchAlerts = async () => {
     setLoading(true);
     try {
-      const token = localStorage.getItem('custom_token');
+      // const token = localStorage.getItem('custom_token');
+         const token = getToken()
       const response = await axios.get('http://localhost:8000/api/alerts/', {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -28,7 +30,7 @@ function AlertsPage({ setAuth }) {
 
   return (
     <div className="min-h-screen bg-gradient-to-tr from-gray-50 via-blue-100 to-blue-200 ">
-      <Navbar setAuth={setAuth} />
+      {/*<Navbar setAuth={setAuth} />*/}
 
       <div className="bg-white p-6 rounded-xl shadow-2xl border border-red-300">
         <div className="flex justify-between items-center mb-6">

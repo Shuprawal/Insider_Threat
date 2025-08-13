@@ -1,24 +1,32 @@
 import os
+import secrets
 
 from django.contrib.auth.tokens import default_token_generator
-from django.core.mail import send_mail
+from django.core.mail import send_mail, EmailMultiAlternatives
 from django.core.paginator import Paginator
 from django.http import JsonResponse
 from django.shortcuts import redirect
+from django.template.loader import render_to_string
 from django.utils.decorators import method_decorator
+from django.utils.html import strip_tags
 from django.views import View
 from django.db.models import Q, Count, Max, Avg
 from django.views.decorators.csrf import csrf_exempt
+from rest_framework import status
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import AllowAny
 
 from Dissertation import settings
-from ThreatDetection.models import CustomUser, ActivityLogs, Alerts
+from ThreatDetection.models import CustomUser, ActivityLogs, Alerts, PasswordResetToken
 from src.dashboard.forms import DateRangeForm
 from django.utils.timezone import now, timedelta
 import json
 from src.mlengine.utils import my_get_object_or_404
 from src.users.form import RegistrationForm
-from src.users.utils import suggest_usernames
+from src.users.utils import suggest_usernames, _validate_email, RESET_TOKEN_BYTES, RESET_TOKEN_TTL_HOURS
 from src.users.tasks import delete_if_unfinished_signup
+from rest_framework.response import Response
+from django.utils import timezone
 
 
 @method_decorator(csrf_exempt, name='dispatch')
@@ -77,7 +85,8 @@ class RegistrationView(View):
             frontend_origin = os.getenv('FRONTEND_ORIGIN', 'http://localhost:3000')
             token = default_token_generator.make_token(user)
             uid = user.pk
-            activation_url = f"{frontend_origin}/activate/{uid}/{token}/"
+            # activation_url = f"{frontend_origin}/activate/{uid}/{token}/"
+            activation_url = f"{frontend_origin}/password-setup/activate/{uid}/{token}"
 
             # Pretty HTML email + plain text fallback
             subject = "Confirm your registration"
@@ -374,3 +383,203 @@ class DeleteUserView(View):
         user = my_get_object_or_404(CustomUser, id=user_id)
         user.delete()
         return redirect('user-detail', user_id=user_id)
+
+
+#
+#
+# @csrf_exempt
+# @api_view(['POST'])
+# def forgot_password(request):
+#
+#     email = (request.data.get('email') or '').strip()
+#     if not _validate_email(email):
+#         return Response({'error': 'Enter a valid email address.'}, status=status.HTTP_400_BAD_REQUEST)
+#
+#     try:
+#         user = CustomUser.objects.get(email__iexact=email)
+#     except CustomUser.DoesNotExist:
+#         return Response({'error': 'Email does not exist.'}, status=status.HTTP_404_NOT_FOUND)
+#
+#     # Invalidate any previous active tokens (optional but recommended)
+#     PasswordResetToken.objects.filter(user=user, used=False, expires_at__gt=timezone.now()).update(used=True)
+#
+#     # Create fresh token
+#     raw_token = secrets.token_urlsafe(RESET_TOKEN_BYTES)
+#     expires_at = timezone.now() + timedelta(hours=RESET_TOKEN_TTL_HOURS)
+#     PasswordResetToken.objects.create(user=user, token=raw_token, expires_at=expires_at)
+#
+#     # Build frontend link like: https://frontend/reset-password/<token>
+#     frontend_base = getattr(settings, 'FRONTEND_URL', 'http://localhost:5173')
+#     reset_url = f"{frontend_base}/reset-password/{raw_token}"
+#
+#     # Send the email (custom message; no Django built-in reset helpers)
+#     send_mail(
+#         subject="Password reset instructions",
+#         message=(
+#             "You requested a password reset.\n\n"
+#             f"Use this link to set a new password (valid {RESET_TOKEN_TTL_HOURS} hour(s)):\n{reset_url}\n\n"
+#             "If you didn’t request this, please ignore this email."
+#         ),
+#         from_email=settings.DEFAULT_FROM_EMAIL,
+#         recipient_list=[email],
+#         fail_silently=False,
+#     )
+#
+#     return Response({'message': 'Password reset link sent to your email.'}, status=status.HTTP_200_OK)
+#
+#
+# @csrf_exempt
+# @api_view(['POST'])
+# @permission_classes([AllowAny])
+# def password_reset_confirm(request):
+#     """
+#     Body: { "token": "<token-from-email>", "password": "NewStrong#123" }
+#     - Verifies token exists, not used, not expired
+#     - Sets new password
+#     - Marks token as used
+#     """
+#     token = (request.data.get('token') or '').strip()
+#     password = (request.data.get('password') or '').strip()
+#
+#     if not token:
+#         return Response({'error': 'Missing token.'}, status=status.HTTP_400_BAD_REQUEST)
+#     if len(password) < 8:
+#         return Response({'error': 'Password must be at least 8 characters.'}, status=status.HTTP_400_BAD_REQUEST)
+#
+#     try:
+#         rec = PasswordResetToken.objects.select_related('user').get(token=token)
+#     except PasswordResetToken.DoesNotExist:
+#         return Response({'error': 'Invalid reset token.'}, status=status.HTTP_400_BAD_REQUEST)
+#
+#     if rec.used:
+#         return Response({'error': 'This reset link has already been used.'}, status=status.HTTP_400_BAD_REQUEST)
+#     if rec.is_expired():
+#         return Response({'error': 'This reset link has expired.'}, status=status.HTTP_400_BAD_REQUEST)
+#
+#     # Update the user's password (use Django hasher)
+#     user = rec.user
+#     user.set_password(password)
+#     user.save()
+#
+#     # Mark token as used
+#     rec.used = True
+#     rec.save(update_fields=['used'])
+#
+#     return Response({'success': True, 'message': 'Password has been reset successfully.'}, status=status.HTTP_200_OK)
+
+
+
+# views.py
+import re, secrets
+from datetime import timedelta
+from django.conf import settings
+from django.utils import timezone
+from django.views.decorators.csrf import csrf_exempt
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import AllowAny
+from rest_framework.response import Response
+from rest_framework import status
+
+
+from django.contrib.auth import get_user_model
+CustomUser = get_user_model()
+
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+RESET_TOKEN_BYTES = 48
+RESET_TOKEN_TTL_HOURS = 1
+
+def _validate_email(e: str) -> bool:
+    return bool(e and EMAIL_RE.match(e))
+
+@csrf_exempt
+@api_view(['POST'])
+def forgot_password(request):
+    email = (request.data.get('email') or '').strip()
+    if not _validate_email(email):
+        return Response({'error': 'Enter a valid email address.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        user = CustomUser.objects.get(email__iexact=email)
+    except CustomUser.DoesNotExist:
+        return Response({'error': 'Email does not exist.'}, status=status.HTTP_404_NOT_FOUND)
+
+    # Invalidate previous active tokens
+    PasswordResetToken.objects.filter(
+        user=user, used=False, expires_at__gt=timezone.now()
+    ).update(used=True)
+
+    # Create fresh token
+    raw_token = secrets.token_urlsafe(RESET_TOKEN_BYTES)
+    expires_at = timezone.now() + timedelta(hours=RESET_TOKEN_TTL_HOURS)
+    PasswordResetToken.objects.create(user=user, token=raw_token, expires_at=expires_at)
+
+    # Build reset URL for your front-end
+    frontend_base = getattr(settings, 'FRONTEND_URL', 'http://localhost:3000')
+    # reset_url = f"{frontend_base}/reset-password/{raw_token}"
+    reset_url = f"{frontend_base}/password-setup/reset/{raw_token}"
+
+    # -------- HTML email using template ----------
+    ctx = {
+        "app_name": getattr(settings, "APP_NAME", "Insider Threat Detection"),
+        "reset_url": reset_url,
+        "valid_hours": RESET_TOKEN_TTL_HOURS,
+        "support_email": getattr(settings, "SUPPORT_EMAIL", settings.DEFAULT_FROM_EMAIL),
+        "year": timezone.now().year,
+        # optional extras used by the template (safe to omit if not referenced)
+        "brand_color": getattr(settings, "BRAND_COLOR", "#2563EB"),
+        "logo_url": getattr(settings, "EMAIL_LOGO_URL", None),
+    }
+
+    html_body = render_to_string("emails/password_reset_email.html", ctx)
+    # If you also create emails/password_reset_email.txt it will be used; else strip HTML
+    try:
+        text_body = render_to_string("emails/password_reset_email.txt", ctx).strip()
+    except Exception:
+        text_body = ""
+    if not text_body:
+        text_body = strip_tags(html_body)
+
+    msg = EmailMultiAlternatives(
+        subject="Reset your password",
+        body=text_body,
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        to=[email],
+        reply_to=[ctx["support_email"]],
+        headers={"X-Entity-Ref-ID": "pwd-reset"},
+    )
+    msg.attach_alternative(html_body, "text/html")
+    msg.send(fail_silently=False)
+    # --------------------------------------------
+
+    return Response({'message': 'Password reset link sent to your email.'}, status=status.HTTP_200_OK)
+
+@api_view(['POST'])
+@csrf_exempt
+@permission_classes([AllowAny])
+def password_reset_confirm(request):
+    token = (request.data.get('token') or '').strip()
+    password = (request.data.get('password') or '').strip()
+
+    if not token:
+        return Response({'error': 'Missing token.'}, status=400)
+    if len(password) < 8:
+        return Response({'error': 'Password must be at least 8 characters.'}, status=400)
+
+    try:
+        rec = PasswordResetToken.objects.select_related('user').get(token=token)
+    except PasswordResetToken.DoesNotExist:
+        return Response({'error': 'Invalid reset token.'}, status=400)
+
+    if rec.used:
+        return Response({'error': 'This reset link has already been used.'}, status=400)
+    if rec.is_expired():
+        return Response({'error': 'This reset link has expired.'}, status=400)
+
+    user = rec.user
+    user.set_password(password)
+    user.save()
+
+    rec.used = True
+    rec.save(update_fields=['used'])
+
+    return Response({'success': True, 'message': 'Password has been reset successfully.'}, status=200)

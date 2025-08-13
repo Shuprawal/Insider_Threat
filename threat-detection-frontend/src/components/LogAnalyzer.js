@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import Navbar from './Navbar';
+
 
 const LogAnalyzer = ({ setAuth }) => {
   const [file, setFile] = useState(null);
@@ -54,7 +54,6 @@ const LogAnalyzer = ({ setAuth }) => {
 
   return (
     <div className="min-h-screen bg-gray-100">
-      <Navbar setAuth={setAuth} />
 
       <div className="max-w-4xl mx-auto bg-white rounded-lg shadow-xl p-8 mt-6">
         <h2 className="text-2xl font-semibold text-center text-blue-700 mb-6">

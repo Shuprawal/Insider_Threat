@@ -1,248 +1,234 @@
 import React, { useState } from 'react';
 import axios from 'axios';
+import '../App.css';
+import { getToken } from './authStorage';
 
-function Register() {
+
+export default function Register({ setAuth }) {
   const departments = ['IT', 'HR', 'Finance', 'Legal', 'Security'];
 
-  // Form states
+
+
+    const HERO_IMAGE_URL = 'http://localhost:8000/static/img/cyber1.jpg';
+
+
+
+  // Form state
   const [username, setUsername] = useState('');
   const [firstName, setFirstName] = useState('');
-  const [lastName, setLastName] = useState('');
-  const [email, setEmail] = useState('');
-  const [address, setAddress] = useState('');
-  const [department, setDepartment] = useState('');
-  const [profilePic, setProfilePic] = useState(null);
+  const [lastName,  setLastName]  = useState('');
+  const [email,     setEmail]     = useState('');
+  const [address,   setAddress]   = useState('');
+  const [department,setDepartment]= useState('');
+  const [profilePic,setProfilePic]= useState(null);
 
-  // UI states
+  // UI state
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [usernameSuggestions, setUsernameSuggestions] = useState([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const clearBanners = () => { setError(''); setMessage(''); setUsernameSuggestions([]); };
+
   const handleRegister = async (e) => {
     e.preventDefault();
-    setError('');
-    setMessage('');
-    setUsernameSuggestions([]);
+    clearBanners();
 
-    // Basic frontend validation
-    if (username.length < 4) {
-      setError('Username must be at least 4 characters long.');
-      return;
-    }
-    if (!email) {
-      setError('Email is required.');
-      return;
-    }
+    // simple validation
+    if (username.trim().length < 4) return setError('Username must be at least 4 characters long.');
     const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailPattern.test(email)) {
-      setError('Invalid email format.');
-      return;
-    }
-    if (!department) {
-      setError('Please select a department.');
-      return;
-    }
+    if (!email || !emailPattern.test(email)) return setError('Please provide a valid email.');
+    if (!department) return setError('Please select a department.');
 
     try {
       setIsSubmitting(true);
 
-      // Prepare form data for backend
       const formData = new FormData();
-      formData.append('username', username);
-      formData.append('first_name', firstName);
-      formData.append('last_name', lastName);
-      formData.append('email', email);
-      formData.append('address', address);
+      formData.append('username', username.trim());
+      formData.append('first_name', firstName.trim());
+      formData.append('last_name',  lastName.trim());
+      formData.append('email',      email.trim());
+      formData.append('address',    address.trim());
       formData.append('department', department);
-      formData.append('role', 'employee'); // Default role
-      if (profilePic) {
-        formData.append('profile_picture', profilePic);
-      }
+      formData.append('role',       'employee'); // default
+      if (profilePic) formData.append('profile_picture', profilePic);
 
-      const response = await axios.post('http://localhost:8000/api/register/', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
+      // const token = localStorage.getItem('custom_token'); // admin token
+      //   import { getToken } from './authStorage'; // adjust path
+        const token = getToken();
+
+      const res = await axios.post('http://localhost:8000/api/register/', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
       });
 
-      if (response.data.success) {
-        setMessage('✅ Registration successful! Check your email to activate your account.');
-        setUsername('');
-        setFirstName('');
-        setLastName('');
-        setEmail('');
-        setAddress('');
-        setDepartment('');
-        setProfilePic(null);
+      if (res.data?.success) {
+        setMessage('✅ Registration successful! User created and activation email sent.');
+        setUsername(''); setFirstName(''); setLastName('');
+        setEmail(''); setAddress(''); setDepartment(''); setProfilePic(null);
       } else {
-        setError(response.data.error || 'Something went wrong.');
-        if (response.data.suggestions) {
-          setUsernameSuggestions(response.data.suggestions);
-        }
+        setError(res.data?.error || 'Something went wrong.');
+        if (res.data?.suggestions) setUsernameSuggestions(res.data.suggestions);
       }
     } catch (err) {
-      if (err.response?.data?.suggestions) {
-        setUsernameSuggestions(err.response.data.suggestions);
-      }
-      setError(
-        err.response?.data?.error ||
-        (typeof err.response?.data === 'string' ? err.response.data : 'Registration failed.')
-      );
+      if (err.response?.data?.suggestions) setUsernameSuggestions(err.response.data.suggestions);
+      setError(err.response?.data?.error || 'Registration failed.');
     } finally {
       setIsSubmitting(false);
     }
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-900 via-blue-900 to-gray-800">
-      <div className="bg-white p-8 rounded-2xl shadow-2xl w-full max-w-md transform transition-all duration-500 hover:scale-105">
-        {/* Logo */}
-        <div className="flex justify-between items-center mb-6">
-          <div className="w-16 h-16 bg-blue-600 rounded-full flex items-center justify-center text-white text-2xl font-bold">
-            ITD
-          </div>
-        </div>
-        <h2 className="text-3xl font-extrabold text-center text-gray-800 mb-2">User Registration</h2>
-        <p className="text-center text-gray-500 mb-6">Insider Threat Detection System</p>
+    <div className="imdash-page">
 
-        {/* Error Message */}
-        {error && (
-          <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-6 rounded-r-lg">
-            <p>{error}</p>
-          </div>
-        )}
 
-        {/* Success Message */}
-        {message && (
-          <div className="bg-green-100 border-l-4 border-green-500 text-green-700 p-4 mb-6 rounded-r-lg">
-            <p>{message}</p>
-          </div>
-        )}
+      {/* wrapper hero */}
+      <section className="imreg-hero">
+        {/* Left: form card */}
+        <div className="imreg-panel">
 
-        {/* Username Suggestions */}
-        {usernameSuggestions.length > 0 && (
-          <div className="mb-4 bg-blue-50 border border-blue-300 p-3 rounded-lg">
-            <p className="font-semibold text-blue-700">Suggestions:</p>
-            <ul className="list-disc ml-5 text-sm">
-              {usernameSuggestions.map((s, i) => (
-                <li
-                  key={i}
-                  className="cursor-pointer text-blue-600 hover:underline"
-                  onClick={() => setUsername(s)}
-                >
-                  {s}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
 
-        {/* Registration Form */}
-        <form onSubmit={handleRegister} className="space-y-5">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
-            <input
-              type="text"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              className="w-full p-3 pl-4 border border-gray-300 rounded-lg"
-              required
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">First Name</label>
-            <input
-              type="text"
-              value={firstName}
-              onChange={(e) => setFirstName(e.target.value)}
-              className="w-full p-3 pl-4 border border-gray-300 rounded-lg"
-              required
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Last Name</label>
-            <input
-              type="text"
-              value={lastName}
-              onChange={(e) => setLastName(e.target.value)}
-              className="w-full p-3 pl-4 border border-gray-300 rounded-lg"
-              required
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full p-3 pl-4 border border-gray-300 rounded-lg"
-              required
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Address</label>
-            <input
-              type="text"
-              value={address}
-              onChange={(e) => setAddress(e.target.value)}
-              className="w-full p-3 pl-4 border border-gray-300 rounded-lg"
-              required
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Department</label>
-            <select
-              value={department}
-              onChange={(e) => setDepartment(e.target.value)}
-              className="w-full p-3 pl-4 border border-gray-300 rounded-lg bg-white"
-              required
-            >
-              <option value="">-- Select Department --</option>
-              {departments.map((dept) => (
-                <option key={dept} value={dept}>
-                  {dept}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Profile Picture</label>
-            <input
-              type="file"
-              accept="image/*"
-              onChange={(e) => setProfilePic(e.target.files[0])}
-              className="w-full p-3 pl-4 border border-gray-300 rounded-lg bg-white"
-            />
-          </div>
-
-          <button
-            type="submit"
-            disabled={isSubmitting}
-            className={`w-full bg-blue-600 text-white p-3 rounded-lg transition duration-300 transform ${
-              isSubmitting ? 'opacity-50 cursor-not-allowed' : 'hover:bg-blue-700 hover:scale-105'
-            }`}
-          >
-            {isSubmitting ? 'Registering...' : 'Register'}
-          </button>
-        </form>
-
-        {/* Already have account */}
-        <div className="mt-6 text-center">
-          <p className="text-sm text-gray-500">
-            Already have an account?{' '}
-            <a href="/login" className="text-blue-600 underline">
-              Login here
-            </a>
+          <h1 className="imreg-title">Member signup</h1>
+          <p className="imreg-subtitle">
+            Create employee accounts with strong defaults. No hidden steps, no confusion.
           </p>
+
+          {/* banners */}
+          {error && <div className="im-banner im-banner--error">{error}</div>}
+          {message && !error && <div className="im-banner im-banner--ok">{message}</div>}
+
+          {/* suggestions */}
+          {usernameSuggestions.length > 0 && (
+            <div className="imreg-suggest">
+              <div className="im-card-title">Suggested usernames</div>
+              <ul>
+                {usernameSuggestions.map((s, i) => (
+                  <li key={i}>
+                    <button type="button" onClick={() => setUsername(s)} className="im-link">
+                      {s}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* form */}
+          <form onSubmit={handleRegister} className="imreg-form">
+  <label className="im-label">Email</label>
+  <input
+    type="email"
+    className="im-input imreg-input-lg"
+    placeholder="Your email"
+    value={email}
+    onChange={e => setEmail(e.target.value)}
+    required
+  />
+
+  {/* expanded fields */}
+  <div className="im-grid im-grid--2col imreg-form-more">
+    <div>
+      <label className="im-label">Username</label>
+      <input
+        type="text"
+        className="im-input"
+        value={username}
+        onChange={(e) => setUsername(e.target.value)}
+        required
+      />
+    </div>
+    <div>
+      <label className="im-label">Department</label>
+      <select
+        className="im-input"
+        value={department}
+        onChange={(e) => setDepartment(e.target.value)}
+        required
+      >
+        <option value="">-- Select Department --</option>
+        {departments.map(d => <option key={d} value={d}>{d}</option>)}
+      </select>
+    </div>
+    <div>
+      <label className="im-label">First name</label>
+      <input
+        type="text"
+        className="im-input"
+        value={firstName}
+        onChange={(e) => setFirstName(e.target.value)}
+        required
+      />
+    </div>
+    <div>
+      <label className="im-label">Last name</label>
+      <input
+        type="text"
+        className="im-input"
+        value={lastName}
+        onChange={(e) => setLastName(e.target.value)}
+        required
+      />
+    </div>
+    <div className="im-grid-span-2">
+      <label className="im-label">Address</label>
+      <input
+        type="text"
+        className="im-input"
+        value={address}
+        onChange={(e) => setAddress(e.target.value)}
+        required
+      />
+    </div>
+    <div className="im-grid-span-2">
+      <label className="im-label">Profile picture (optional)</label>
+      <input
+        type="file"
+        className="im-input"
+        accept="image/*"
+        onChange={(e) => setProfilePic(e.target.files[0])}
+      />
+    </div>
+  </div>
+
+  {/* CTA at the very bottom */}
+  <button
+    type="submit"
+    className="im-btn im-btn--primary imreg-cta"
+    disabled={isSubmitting}
+  >
+    {isSubmitting ? 'Registering…' : 'Get Started'}
+  </button>
+</form>
+
+          {/* feature bullets */}
+          <div className="imreg-features">
+            <div className="imreg-feature"><span>✓</span> RBAC-ready accounts out of the box</div>
+            <div className="imreg-feature"><span>✓</span> Adaptive risk policy per department</div>
+            <div className="imreg-feature"><span>✓</span> Realtime anomaly alerts to security</div>
+            <div className="imreg-feature"><span>✓</span> SSO-friendly and audit-ready</div>
+            <div className="imreg-feature"><span>✓</span> Built-in email verification</div>
+          </div>
+
+          <div className="imreg-legal">
+            <a className="im-link" href="/privacy">Privacy Policy</a>
+            <a className="im-link" href="/terms">Terms of Service</a>
+          </div>
         </div>
-      </div>
+
+        {/* Right: image + headline */}
+        <div
+          className="imreg-visual"
+          style={{ backgroundImage: `url('${HERO_IMAGE_URL}')` }}
+          aria-hidden="true"
+        >
+          <div className="imreg-visual-overlay">
+            <h2 className="imreg-bigline">Every team deserves</h2>
+            <h3 className="imreg-bigline-2">security by default</h3>
+          </div>
+        </div>
+      </section>
     </div>
   );
 }
-
-export default Register;

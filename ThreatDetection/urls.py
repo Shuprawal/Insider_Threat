@@ -17,7 +17,7 @@ urlpatterns = [
 
 
     # path('api/custom-login/', views.custom_login),
-    path('custom-login/', views.custom_login),
+    # path('custom-login/', views.custom_login),
     path('hybrid-threats/', hybrid_user_level_threat_detection, name='hybrid_threats'),
 
     path('logs/all/', get_all_logs, name='get_all_logs'),

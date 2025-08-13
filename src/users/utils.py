@@ -1,5 +1,7 @@
 # utils.py
 import re
+
+from django.contrib.auth import get_user_model
 from django.utils.text import slugify
 
 from ThreatDetection.models import CustomUser
@@ -64,3 +66,19 @@ def suggest_usernames(desired: str, n: int = 5) -> list[str]:
         i += 1
 
     return suggestions
+
+
+
+
+User = get_user_model()
+
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+RESET_TOKEN_BYTES = 48          # token_urlsafe(48) ~ 64+ chars
+RESET_TOKEN_TTL_HOURS = 1       # token validity window
+
+
+def _validate_email(e: str):
+    if not e or not EMAIL_RE.match(e):
+        return False
+    return True

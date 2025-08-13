@@ -1,8 +1,9 @@
 // src/components/CreateLogPage.jsx
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import Navbar from './Navbar';
 import { useNavigate } from 'react-router-dom';
+import {getToken} from "./authStorage";
+// import { getToken } from "./authStorage";
 
 export default function CreateLogPage({ setAuth }) {
   const [userId, setUserId] = useState('');
@@ -29,7 +30,8 @@ export default function CreateLogPage({ setAuth }) {
   useEffect(() => {
     (async () => {
       try {
-        const token = localStorage.getItem('custom_token');
+        // const token = localStorage.getItem('custom_token');
+          const token = getToken()
         const res = await axios.get(`${API_BASE}/api/users/`, {
           headers: { Authorization: `Bearer ${token}` },
         });
@@ -85,7 +87,8 @@ export default function CreateLogPage({ setAuth }) {
 
     try {
       setSubmitting(true);
-      const token = localStorage.getItem('custom_token');
+      // const token = localStorage.getItem('custom_token');
+      const token = getToken()
       const res = await axios.post(`${API_BASE}/api/logs/create/`, payload, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -155,7 +158,6 @@ export default function CreateLogPage({ setAuth }) {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-100 to-blue-200">
-      <Navbar setAuth={setAuth} />
       <div className="bg-white max-w-2xl mx-auto p-8 rounded-xl shadow-lg">
         <h2 className="text-2xl font-bold mb-6 text-center text-blue-800">🛡️ Log Insider Threat Activity</h2>
 

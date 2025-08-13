@@ -467,39 +467,59 @@ def fetch_activity_logs_for_user(request):
 
 
 #  Custom Login
+
+
+from django.views.decorators.http import require_POST
+from django.views.decorators.csrf import csrf_exempt
+from django.http import JsonResponse
+from django.conf import settings
+from django.utils.datastructures import MultiValueDictKeyError
+import json, hashlib
+from .models import CustomUser
+  # your helper
+
 @csrf_exempt
-
+@require_POST
 def custom_login(request):
-    if request.method == 'POST':
+    try:
+        # Accept JSON OR form-encoded
+        if request.content_type and 'application/json' in request.content_type:
+            payload = json.loads(request.body.decode('utf-8') or '{}')
+        else:
+            payload = request.POST.dict()
+
+        # Support username OR email OR identifier
+        ident = (
+            payload.get('identifier')
+            or payload.get('username')
+            or payload.get('email')
+            or ''
+        ).strip()
+        pwd = (payload.get('password') or '').strip()
+
+        if not ident or not pwd:
+            return JsonResponse({'error': 'Username and password required'}, status=400)
+
+
         try:
-            data = json.loads(request.body)
-            entered_username = data.get('username')
-            entered_password = data.get('password')
+            if '@' in ident:
+                user = CustomUser.objects.get(email__iexact=ident)
+            else:
+                user = CustomUser.objects.get(username__iexact=ident)
+        except CustomUser.DoesNotExist:
+            return JsonResponse({'error': 'User not found'}, status=404)
 
-            if not entered_username or not entered_password:
-                return JsonResponse({'error': 'Username and password required'}, status=400)
+        if not user.is_active:
+            return JsonResponse({'error': 'User account is inactive. To activate check your email'}, status=401)
 
-            try:
-                user = CustomUser.objects.get(username=entered_username)
-            except CustomUser.DoesNotExist:
-                return JsonResponse({'error': 'User not found'}, status=404)
+        # Your custom SHA256 check (since you store raw hashes)
+        if hashlib.sha256(pwd.encode()).hexdigest() != user.password:
+            return JsonResponse({'error': 'Invalid credentials'}, status=401)
 
-            # Manually hash the entered password
-            entered_hash = hashlib.sha256(entered_password.encode()).hexdigest()
-
-            if entered_hash != user.password:
-                return JsonResponse({'error': 'Invalid credentials'}, status=401)
-
-            # ✅ Generate JWT token
-            print("📌 User ID:", user.id)
-            token = generate_auth_token(user)
-
-            return JsonResponse({'token': token})
-
-        except json.JSONDecodeError:
-            return JsonResponse({'error': 'Invalid JSON'}, status=400)
-
-    return JsonResponse({'error': 'Invalid request method'}, status=405)
+        token = generate_auth_token(user)
+        return JsonResponse({'token': token})
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'Invalid JSON'}, status=400)
 
     # if request.method == 'POST':
     #     try:

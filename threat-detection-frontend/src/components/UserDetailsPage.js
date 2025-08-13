@@ -3,10 +3,11 @@ import { useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { FaUserCircle } from 'react-icons/fa';
 import { FiEdit2 } from 'react-icons/fi';
-import Navbar from "./Navbar";
+
 import DashboardCharts from "./DashboardCharts";
 import DateFilter from "./Date";
 import SiteFooter from "./SiteFooter";
+import {getToken} from "./authStorage";
 
 function UserDetailsPage() {
   const { userId, username } = useParams();
@@ -32,7 +33,8 @@ function UserDetailsPage() {
   const [activitiesLimit, setActivitiesLimit] = useState(100);
   const [isLoading, setIsLoading] = useState(false);
 
-  const token = localStorage.getItem('custom_token');
+  // const token = localStorage.getItem('custom_token');
+    const token = getToken()
   const cfg = { headers: { Authorization: `Bearer ${token}` } };
 
   const resolveAvatar = (pic) => {
@@ -178,7 +180,6 @@ function UserDetailsPage() {
   if (error) {
     return (
       <div style={{ minHeight: '100vh', background: 'var(--im-bg)', color: 'var(--im-text)' }}>
-        <Navbar />
         <div style={{ maxWidth: 1100, margin: '2rem auto', padding: '1rem' }}>
           <div style={{
             background: 'var(--im-surface)', border: '1px solid var(--im-border)',
@@ -200,7 +201,7 @@ function UserDetailsPage() {
   if (!user) {
     return (
       <div style={{ minHeight: '100vh', background: 'var(--im-bg)', color: 'var(--im-text)' }}>
-        <Navbar />
+
         <div style={{ textAlign: 'center', marginTop: '3rem' }}>Loading…</div>
         <SiteFooter />
       </div>
@@ -213,7 +214,7 @@ function UserDetailsPage() {
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--im-bg)', color: 'var(--im-text)', display: 'flex', flexDirection: 'column' }}>
-      <Navbar />
+
 
       <main style={{ flex: 1 }}>
         <div className="p-8">

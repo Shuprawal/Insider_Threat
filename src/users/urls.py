@@ -1,5 +1,6 @@
 from django.urls import path
 
+from src.users import views
 from src.users.views import *
 
 urlpatterns = [
@@ -11,8 +12,10 @@ urlpatterns = [
     path('users/<int:user_id>/suspend/', SuspendUserView.as_view()),
     path('users/<int:user_id>/delete/', DeleteUserView.as_view()),
 
+    path('forgot-password/', views.forgot_password, name='forgot_password'),
 
-
+    # called by your ResetPassword page (POST new password with token)
+    path('password-reset-confirm/', views.password_reset_confirm, name='password_reset_confirm')
 
 
 ]
