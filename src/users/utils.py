@@ -82,3 +82,15 @@ def _validate_email(e: str):
     if not e or not EMAIL_RE.match(e):
         return False
     return True
+
+
+
+
+def parse_bool(val):
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, str):
+        return val.strip().lower() in {"1", "true", "yes", "on"}
+    if isinstance(val, (int, float)):
+        return val != 0
+    return False

@@ -655,30 +655,141 @@ class CustomLogListAllView(APIView):
         return Response(serializer.data)
 
 
-from django.views.decorators.csrf import csrf_exempt
+from datetime import datetime
 from django.http import JsonResponse
+from django.utils import timezone
+from django.utils.dateparse import parse_date
+from django.views.decorators.csrf import csrf_exempt
+from django.core.paginator import Paginator, EmptyPage
+from django.db.models import Q
+
 from ThreatDetection.models import Alerts
+# from .auth_utils import get_authenticated_user  # use your existing helper
+
+def _aware(dt):
+    return dt if timezone.is_aware(dt) else timezone.make_aware(dt, timezone.get_current_timezone())
+
+def _coerce_user(u):
+    """
+    Returns a normalized dict for either:
+    - FK user model instance, or
+    - plain string username (CharField on ActivityLogs.user), or
+    - None
+    """
+    if u is None:
+        return None
+    if isinstance(u, str):
+        return {"id": None, "username": u}
+    # model instance
+    return {
+        "id": getattr(u, "id", None),
+        "username": getattr(u, "username", None) or getattr(u, "userName", None),
+        "email": getattr(u, "email", None),
+        "department": getattr(u, "department", None),
+        "role": getattr(u, "role", None),
+    }
+
+def _serialize_alert(a):
+    # actor who generated the log (FK or string)
+    actor_user = getattr(a.log, "user", None)
+    return {
+        "id": a.id,
+        "score": float(a.score) if a.score is not None else 0.0,
+        "status": a.status or "open",
+        "created_at": timezone.localtime(a.created_at).strftime("%Y-%m-%d %H:%M:%S"),
+        "reason": a.reason or "",
+        "log_id": a.log_id,
+        "user": _coerce_user(actor_user),
+        "assigned_to": _coerce_user(getattr(a, "assigned_to", None)),
+    }
 
 @csrf_exempt
 def alerts_list(request):
     auth_user = get_authenticated_user(request)
-    if not auth_user or auth_user.role != 'admin':
-        return JsonResponse({'error': 'Unauthorized'}, status=401)
+    # if not auth_user or getattr(auth_user, "role", None) != "admin":
+    #     return JsonResponse({"error": "Unauthorized"}, status=401)
 
-    if request.method == 'GET':
-        alerts = Alerts.objects.select_related('log').order_by('-created_at')
-        data = [
-            {
-                "id": alert.id,
-                # "message": alert.message,
-                "created_at": alert.created_at.strftime("%Y-%m-%d %H:%M:%S"),
-                "log": alert.log_id
-            }
-            for alert in alerts
-        ]
-        return JsonResponse(data, safe=False)
+    if request.method != "GET":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
 
-    return JsonResponse({'error': 'Method not allowed'}, status=405)
+    # ---------- incoming params ----------
+    start_date_str = request.GET.get("start_date")
+    end_date_str   = request.GET.get("end_date")
+    status_param   = (request.GET.get("status") or "all").lower()   # open | closed | all
+    q              = (request.GET.get("q") or "").strip()           # search reason / user / assigned
+    try:
+        page = max(1, int(request.GET.get("page", 1)))
+    except ValueError:
+        page = 1
+    try:
+        page_size = int(request.GET.get("page_size", 12))
+    except ValueError:
+        page_size = 12
+    page_size = max(1, min(page_size, 100))
+
+    order = (request.GET.get("order") or "created_desc").lower()
+    order_map = {
+        "created_desc": "-created_at",
+        "created_asc": "created_at",
+        "score_desc": "-score",
+        "score_asc": "score",
+    }
+    order_by = order_map.get(order, "-created_at")
+
+    # ---------- queryset ----------
+    # Be tolerant if ActivityLogs.user is a CharField (not a relation).
+    try:
+        qs = Alerts.objects.select_related("assigned_to", "log", "log__user")
+    except Exception:
+        qs = Alerts.objects.select_related("assigned_to", "log")
+
+    qs = qs.order_by(order_by)
+
+    # date range (YYYY-MM-DD)
+    if start_date_str and end_date_str:
+        sd = parse_date(start_date_str)
+        ed = parse_date(end_date_str)
+        if sd and ed:
+            start_dt = _aware(datetime.combine(sd, datetime.min.time()))
+            end_dt   = _aware(datetime.combine(ed, datetime.max.time()))
+            qs = qs.filter(created_at__range=(start_dt, end_dt))
+
+    # status filter
+    if status_param in ("open", "closed"):
+        qs = qs.filter(status=status_param)
+
+    # basic search (safe fields). We search reason and assigned_to fields.
+    if q:
+        qs = qs.filter(
+            Q(reason__icontains=q) |
+            Q(assigned_to__username__icontains=q) |
+            Q(assigned_to__email__icontains=q)
+        )
+
+    # ---------- pagination ----------
+    paginator = Paginator(qs, page_size)
+    try:
+        page_obj = paginator.page(page)
+    except EmptyPage:
+        page_obj = paginator.page(paginator.num_pages)
+
+    results = [_serialize_alert(a) for a in page_obj.object_list]
+
+    # OPTIONAL: If you want client-side additional search over actor username for CharField cases, return a simple `actor_text`
+    # for r in results:
+    #     if r["user"] and not r["user"]["id"] and r["user"]["username"]:
+    #         r["actor_text"] = r["user"]["username"]
+
+    return JsonResponse({
+        "page": page_obj.number,
+        "page_size": page_size,
+        "total_items": paginator.count,
+        "total_pages": paginator.num_pages,
+        "has_next": page_obj.has_next(),
+        "has_prev": page_obj.has_previous(),
+        "results": results,
+    })
+
 
 
 @csrf_exempt
@@ -817,7 +928,6 @@ def hybrid_user_level_threat_detection(request):
 
 @csrf_exempt
 def get_all_logs(request):
-    print('aa')
     logs = ActivityLogs.objects.select_related('user').order_by('-timestamp')[:50]
     data = []
 

@@ -1,186 +1,299 @@
-import React, { useState, useEffect } from 'react';
-import axios from 'axios';
-import { FiEye } from 'react-icons/fi';
-import { useNavigate } from 'react-router-dom';
-import ConfirmModal from './ConfirmModal';
-import '../styles/UsersPageStyles.css';
-import {getToken} from "./authStorage";
+import React, { useEffect, useRef, useState } from "react";
+import axios from "axios";
+import { FiEye } from "react-icons/fi";
+import { useNavigate } from "react-router-dom";
+import ConfirmModal from "./ConfirmModal";
+import { getToken } from "./authStorage";
+import "../styles/UsersPageStyles.css";
 
-function UsersPage() {
+
+export default function UsersPage() {
   const [users, setUsers] = useState([]);
-  const [search, setSearch] = useState('');
-  const [sort, setSort] = useState('a-z');
+  const [search, setSearch] = useState("");
+  const [sort, setSort] = useState("a-z");
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [dropdownOpenId, setDropdownOpenId] = useState(null);
   const [showSuspended, setShowSuspended] = useState(false);
 
-  const [modalMessage, setModalMessage] = useState('');
+  const [modalMessage, setModalMessage] = useState("");
   const [showModal, setShowModal] = useState(false);
   const [modalAction, setModalAction] = useState(() => {});
-
   const navigate = useNavigate();
+
+  // close dropdown on outside click
+  const dropdownRefs = useRef({});
+
+  useEffect(() => {
+    function handleOutside(e) {
+      const anyOpen = Object.values(dropdownRefs.current);
+      if (anyOpen.some((el) => el && el.contains && el.contains(e.target))) {
+        return;
+      }
+      setDropdownOpenId(null);
+    }
+    document.addEventListener("click", handleOutside);
+    return () => document.removeEventListener("click", handleOutside);
+  }, []);
 
   const fetchUsers = async () => {
     try {
-      // const token = localStorage.getItem('custom_token');
-        const token = getToken()
-      const res = await axios.get('http://localhost:8000/api/users/view/', {
+      const token = getToken();
+      const res = await axios.get("http://localhost:8000/api/users/view/", {
         headers: { Authorization: `Bearer ${token}` },
-        params: { search, sort, page, suspended: showSuspended ? 'true' : 'false' },
+        params: { search, sort, page, suspended: showSuspended ? "true" : "false" },
       });
-      setUsers(res.data.users);
-      setTotalPages(res.data.total_pages);
+      setUsers(res.data.users || []);
+      setTotalPages(res.data.total_pages || 1);
     } catch (err) {
-      console.error('Failed to fetch users:', err);
+      console.error("Failed to fetch users:", err);
     }
   };
 
   const toggleSuspension = async (userId, shouldSuspend) => {
     try {
-      // const token = localStorage.getItem('custom_token');
-        const token = getToken()
-      await axios.put(`http://localhost:8000/api/users/${userId}/suspend/`, {
-        is_suspended: shouldSuspend,
-      }, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const token = getToken();
+      await axios.put(
+        `http://localhost:8000/api/users/${userId}/suspend/`,
+        { is_suspended: shouldSuspend },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
       fetchUsers();
     } catch (err) {
-      console.error('Failed to update suspension:', err);
+      console.error("Failed to update suspension:", err);
     }
   };
 
-  const setAuth = (value) => {
-    if (!value) localStorage.removeItem("custom_token");
-  };
+  useEffect(() => {
+    fetchUsers();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search, sort, page, showSuspended]);
 
-  useEffect(() => { fetchUsers(); }, [search, sort, page, showSuspended]);
+  // compute serial number relative to page if your API returns page size
+  const pageSize = users?.length || 0;
 
   return (
-   <div className="userspage-root">
-      <div className="userspage-container">
-        <div className="userspage-header">
-          <h2 className="userspage-title">
-            User <span className="userspage-title-highlight">List</span>
+    <div className="imusers-page-shell-sentinelX">
+      <section className="imusers-panel-container-sentinelX">
+        {/* header row (title + Suspended toggle) */}
+        <div className="imusers-headerbar-sentinelX">
+          <h2 className="imusers-titletext-sentinelX">
+            User <span className="imusers-title-accent-sentinelX">Directory</span>
           </h2>
+
           <button
-            className={`userspage-suspend-btn${showSuspended ? ' suspended' : ''}`}
-            onClick={() => { setShowSuspended(prev => !prev); setPage(1); }}
+            className={
+              "imusers-chipbutton-sentinelX" +
+              (showSuspended ? " imusers-chipbutton--active-sentinelX" : "")
+            }
+            onClick={() => {
+              setShowSuspended((prev) => !prev);
+              setPage(1);
+            }}
           >
-            {showSuspended ? 'Show Active' : 'Suspended'}
+            {showSuspended ? "Show Active" : "Suspended"}
           </button>
         </div>
-        <div className="userspage-controls">
+
+        {/* filter row (search + sort) */}
+        <div className="imusers-filterrow-sentinelX">
           <input
-            type="text" value={search} placeholder="Search users..."
-            onChange={(e) => setSearch(e.target.value)}
-            className="userspage-search"
+            type="text"
+            value={search}
+            placeholder="Search users…"
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setPage(1);
+            }}
+            className="imusers-searchbox-sentinelX"
           />
-          <select
-            value={sort} onChange={(e) => setSort(e.target.value)}
-            className="userspage-sort"
-          >
-            <option value="a-z">A–Z</option>
-            <option value="z-a">Z–A</option>
-            <option value="recent-threat">Recent Threats</option>
-            <option value="most-threats">Most Threats</option>
-          </select>
+
+          <div className="imusers-rightstack-sentinelX">
+            <select
+              value={sort}
+              onChange={(e) => {
+                setSort(e.target.value);
+                setPage(1);
+              }}
+              className="imusers-selectbox-sentinelX"
+            >
+              <option value="a-z">A–Z</option>
+              <option value="z-a">Z–A</option>
+              <option value="recent-threat">Recent Threats</option>
+              <option value="most-threats">Most Threats</option>
+            </select>
+          </div>
         </div>
+
+        {/* empty state */}
         {users.length === 0 ? (
-          <div className="userspage-empty">
-            {showSuspended ? 'No suspended users found.' : 'No users have registered.'}
+          <div className="imusers-emptystate-card-sentinelX">
+            {showSuspended ? "No suspended users found." : "No users have registered."}
           </div>
         ) : (
-          <div className="userspage-table-wrap">
-            <table className="userspage-table">
+          <div className="imusers-tablewrap-sentinelX">
+            <table className="imusers-datatable-sentinelX">
               <thead>
-                <tr className="userspage-table-header-row">
-                    <th>SN</th>
-                  <th>Username</th>
-                  <th>Department</th>
-                  <th>Role</th>
-                  <th>Threats</th>
-                  <th>Created</th>
-                  <th>View</th>
-                  <th>Actions</th>
+                <tr className="imusers-headrow-sentinelX">
+                  <th className="imusers-th-sentinelX">SN</th>
+                  <th className="imusers-th-sentinelX">Username</th>
+                  <th className="imusers-th-sentinelX imusers-colhide-md-sentinelX">Department</th>
+                  <th className="imusers-th-sentinelX imusers-colhide-lg-sentinelX">Role</th>
+                  <th className="imusers-th-sentinelX">Threats</th>
+                  <th className="imusers-th-sentinelX imusers-colhide-md-sentinelX">Created</th>
+                  <th className="imusers-th-sentinelX">View</th>
+                  <th className="imusers-th-sentinelX">Actions</th>
                 </tr>
               </thead>
+
               <tbody>
-                {users.map((user,index) => (
-                  <tr key={user.id} className={`userspage-table-row${(!showSuspended && user.is_suspended) ? ' suspended-row' : ''}`}>
-                      <td>{ index + 1 }</td>
-                    <td className="userspage-usercell">
-                      <span className="userspage-usericon">👤</span>
-                      <span>{user.username}</span>
-                    </td>
-                    <td>{user.department}</td>
-                    <td>{user.role}</td>
-                    <td>{user.threat_count}</td>
-                    <td>{user.created_at}</td>
-                    <td>
-                      <button
-                        onClick={() => navigate(`/users/${user.id}`)}
-                        className="userspage-viewbtn"
-                        title="View Details"
+                {users.map((user, idx) => {
+                  const serial = (page - 1) * Math.max(pageSize, 1) + (idx + 1);
+                  return (
+                    <tr
+                      key={user.id}
+                      className={
+                        "imusers-row-sentinelX" +
+                        (!showSuspended && user.is_suspended ? " imusers-row--muted-sentinelX" : "")
+                      }
+                    >
+                      <td className="imusers-td-sentinelX" data-label="SN">
+                        {serial}
+                      </td>
+
+                      <td className="imusers-td-sentinelX imusers-cell-user-sentinelX" data-label="Username">
+                        <span className="imusers-avatar-sentinelX" aria-hidden>
+                          {user.username?.slice(0, 1)?.toUpperCase() || "U"}
+                        </span>
+                        <span className="imusers-username-sentinelX">{user.username}</span>
+                      </td>
+
+                      <td className="imusers-td-sentinelX imusers-colhide-md-sentinelX" data-label="Department">
+                        {user.department || "—"}
+                      </td>
+
+                      <td className="imusers-td-sentinelX imusers-colhide-lg-sentinelX" data-label="Role">
+                        {user.role || "—"}
+                      </td>
+
+                      <td className="imusers-td-sentinelX" data-label="Threats">
+                        <span
+                          className={
+                            "imusers-badge-sentinelX " +
+                            (user.threat_count > 0
+                              ? "imusers-badge--warn-sentinelX"
+                              : "imusers-badge--neutral-sentinelX")
+                          }
+                        >
+                          {user.threat_count ?? 0}
+                        </span>
+                      </td>
+
+                      <td
+                        className="imusers-td-sentinelX imusers-colhide-md-sentinelX"
+                        data-label="Created"
+                        title={user.created_at}
                       >
-                        <FiEye size={20} />
-                      </button>
-                    </td>
-                    <td className="userspage-actions-cell">
-                      <button
-                        onClick={() => setDropdownOpenId(dropdownOpenId === user.id ? null : user.id)}
-                        className="userspage-actions-toggle"
-                      >
-                        ⋮
-                      </button>
-                      {dropdownOpenId === user.id && (
-                        <div className="userspage-actions-dropdown">
-                          <button className="dropdown-btn edit-btn">Edit</button>
-                          <button className="dropdown-btn delete-btn">Delete</button>
+                        {user.created_at}
+                      </td>
+
+                      <td className="imusers-td-sentinelX" data-label="View">
+                        <button
+                          onClick={() => navigate(`/users/${user.id}`)}
+                          className="imusers-viewbutton-sentinelX"
+                          title="View Details"
+                          aria-label={`View ${user.username}`}
+                        >
+                          <FiEye size={18} />
+                        </button>
+                      </td>
+
+                      <td className="imusers-td-sentinelX imusers-cell-actions-sentinelX" data-label="Actions">
+                        <div
+                          className="imusers-actionwrap-sentinelX"
+                          ref={(el) => {
+                            dropdownRefs.current[user.id] = el;
+                          }}
+                        >
                           <button
-                            className="dropdown-btn suspend-btn"
-                            onClick={() => {
-                              setModalMessage(`Are you sure you want to ${user.is_suspended ? 'unsuspend' : 'suspend'} this user?`);
-                              setModalAction(() => () => toggleSuspension(user.id, !user.is_suspended));
-                              setShowModal(true);
+                            className="imusers-actiontoggle-sentinelX"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDropdownOpenId((prev) => (prev === user.id ? null : user.id));
                             }}
+                            aria-haspopup="menu"
+                            aria-expanded={dropdownOpenId === user.id}
+                            aria-label="Open actions menu"
                           >
-                            {user.is_suspended ? 'Unsuspend' : 'Suspend'}
+                            ⋮
                           </button>
+
+                          {dropdownOpenId === user.id && (
+                            <div className="imusers-actionmenu-sentinelX" role="menu">
+                              <button className="imusers-actionitem-sentinelX" role="menuitem">
+                                Edit
+                              </button>
+                              <button className="imusers-actionitem-sentinelX" role="menuitem">
+                                Delete
+                              </button>
+                              <button
+                                className="imusers-actionitem-sentinelX imusers-actionitem--alert-sentinelX"
+                                role="menuitem"
+                                onClick={() => {
+                                  setModalMessage(
+                                    `Are you sure you want to ${
+                                      user.is_suspended ? "unsuspend" : "suspend"
+                                    } this user?`
+                                  );
+                                  setModalAction(() => () => toggleSuspension(user.id, !user.is_suspended));
+                                  setShowModal(true);
+                                  setDropdownOpenId(null);
+                                }}
+                              >
+                                {user.is_suspended ? "Unsuspend" : "Suspend"}
+                              </button>
+                            </div>
+                          )}
                         </div>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         )}
-        <div className="userspage-pagination">
+
+        {/* pagination */}
+        <div className="imusers-paginationbar-sentinelX">
           <button
             disabled={page <= 1}
-            onClick={() => setPage(page - 1)}
-            className="pagination-btn"
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            className="imusers-pgbtn-sentinelX"
           >
             ⬅ Prev
           </button>
-          <span className="pagination-info">
+          <span className="imusers-pginfo-sentinelX">
             Page {page} of {totalPages}
           </span>
           <button
             disabled={page >= totalPages}
-            onClick={() => setPage(page + 1)}
-            className="pagination-btn"
+            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            className="imusers-pgbtn-sentinelX"
           >
             Next ➔
           </button>
         </div>
-      </div>
+      </section>
+
+      {/* modal */}
       {showModal && (
         <ConfirmModal
           message={modalMessage}
-          onConfirm={() => { modalAction(); setShowModal(false); }}
+          onConfirm={() => {
+            modalAction();
+            setShowModal(false);
+          }}
           onCancel={() => setShowModal(false)}
           confirmText="Yes"
           cancelText="Cancel"
@@ -189,5 +302,3 @@ function UsersPage() {
     </div>
   );
 }
-
-export default UsersPage;

@@ -3,11 +3,15 @@
 from django.db.models import Count, Avg
 from django.db.models.functions import TruncHour, TruncDay, TruncWeek, TruncMonth
 from django.http import JsonResponse
+from django.utils.decorators import method_decorator
 from django.utils.timezone import now, timedelta
 from django.shortcuts import render
 from django.utils.timezone import now
 from django.views import View
 import datetime
+
+from django.views.decorators.csrf import ensure_csrf_cookie
+
 from ThreatDetection.models import Alerts, ActivityLogs
 from .forms import *
 
@@ -118,3 +122,70 @@ class DashboardView(View):
 
         except Exception as e:
             return JsonResponse({'error': str(e)}, status=400)
+
+
+
+
+
+#
+#
+# from rest_framework.generics import RetrieveUpdateAPIView
+# from rest_framework.permissions import IsAuthenticated, IsAdminUser, AllowAny
+# from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
+# from rest_framework_simplejwt.authentication import JWTAuthentication
+# from .models import RealtimeSettings
+# from .serializers import RealtimeSettingsSerializer
+#
+# class RealtimeSettingsSingleton(RetrieveUpdateAPIView):
+#     authentication_classes = (JWTAuthentication,)
+#     parser_classes = (MultiPartParser, FormParser, JSONParser)
+#     serializer_class = RealtimeSettingsSerializer
+#
+#     def get_object(self):
+#         obj, _ = RealtimeSettings.objects.get_or_create(pk=1)
+#         return obj
+#
+#     def get_permissions(self):
+#         # Auth required for all; admin required to modify
+#         if self.request.method in ("PUT", "PATCH"):
+#             return [IsAuthenticated(), IsAdminUser()]
+#         return [IsAuthenticated()]
+
+
+
+# dashboard/views_realtime.py
+from django.db import transaction
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework.permissions import BasePermission, SAFE_METHODS
+from rest_framework import status
+
+from .models import RealtimeSettings
+from .serializers import RealtimeSettingsSerializer
+
+
+
+
+class RealtimeSettingsView(APIView):
+
+
+    def _singleton(self):
+        # Your model already forces pk=1 on save; this guarantees it exists.
+        obj, _ = RealtimeSettings.objects.get_or_create(pk=1)
+        return obj
+
+    def get(self, request):
+        obj = self._singleton()
+        ser = RealtimeSettingsSerializer(obj, context={"request": request})
+        return Response(ser.data)
+
+    @transaction.atomic
+    def put(self, request):
+        obj = self._singleton()
+        ser = RealtimeSettingsSerializer(
+            obj, data=request.data, partial=True, context={"request": request}
+        )
+        if ser.is_valid():
+            ser.save()
+            return Response(ser.data)
+        return Response(ser.errors, status=status.HTTP_400_BAD_REQUEST)

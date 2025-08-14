@@ -1,23 +1,21 @@
-# Dissertation/asgi.py
-
 import os
-import django
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'Dissertation.settings')
-django.setup()
-
+from django.core.asgi import get_asgi_application
 from channels.routing import ProtocolTypeRouter, URLRouter
 from channels.auth import AuthMiddlewareStack
-from django.core.asgi import get_asgi_application
-from ThreatDetection.routing import websocket_urlpatterns
+from channels.security.websocket import AllowedHostsOriginValidator
+from src.dashboard import routing
+from src import dashboard
 
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'Dissertation.settings')
-django.setup()
+
+
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "Dissertation.settings")
 
 application = ProtocolTypeRouter({
     "http": get_asgi_application(),
-    "websocket": AuthMiddlewareStack(
-        URLRouter(
-            websocket_urlpatterns
+    "websocket": AllowedHostsOriginValidator(
+        AuthMiddlewareStack(
+            URLRouter(dashboard.routing.websocket_urlpatterns)
         )
     ),
 })
+

@@ -30,10 +30,9 @@ urlpatterns = [
     path('api/', include('ThreatDetection.urls')),
     path('api/', include('src.logs.urls')),
     path('api/', include('src.dashboard.urls')),
-
     path('api/',include('src.users.urls')),
 
-]
+] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 
 
 if settings.DEBUG:

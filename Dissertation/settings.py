@@ -51,6 +51,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     "ThreatDetection.apps.ThreatDetectionConfig",
     'django.contrib.staticfiles',
+    "src.alerts.apps.AlertsConfig",
     # 'django.contrib.messages',
     # 'django.contrib.staticfiles',
     'corsheaders',
@@ -59,7 +60,7 @@ INSTALLED_APPS = [
     'channels',
     'src.dashboard',
     'src.logs',
-    'src.alerts',
+    # 'src.alerts',
     'src.mlengine',
     'src.users',
 
@@ -71,15 +72,37 @@ TIME_ZONE = 'Asia/Kathmandu'
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'ThreatDetection.authentication.CustomTokenAuthentication',
+        "rest_framework_simplejwt.authentication.JWTAuthentication",
     ],
     'DEFAULT_PERMISSION_CLASSES': [],
 }
 
+from datetime import timedelta
+SIMPLE_JWT = {
+    "AUTH_HEADER_TYPES": ("Bearer",),
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=60),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
+}
+
 AUTH_USER_MODEL = 'ThreatDetection.CustomUser'
 
-# ASGI_APPLICATION = 'Dissertation.asgi.application',
 ASGI_APPLICATION = 'Dissertation.asgi.application'
 
+
+
+
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {"hosts": ["redis://127.0.0.1:6379/0"]},
+    }
+}
+
+MEDIA_URL  = "/media/"
+MEDIA_ROOT = BASE_DIR / "media"
+
+JWT_SECRET = os.getenv("JWT_SECRET", SECRET_KEY)
+JWT_ALGORITHM = "HS256"
 
 
 
@@ -185,12 +208,6 @@ CELERY_RESULT_BACKEND = "redis://localhost:6379/1"
 CELERY_WORKER_POOL = "solo"
 
 
-
-CHANNEL_LAYERS = {
-    "default": {
-        "BACKEND": "channels.layers.InMemoryChannelLayer",
-    }
-}
 
 CSRF_TRUSTED_ORIGINS = [
     "http://localhost:3000",

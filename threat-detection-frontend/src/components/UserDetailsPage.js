@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { FaUserCircle } from 'react-icons/fa';
@@ -7,7 +7,16 @@ import { FiEdit2 } from 'react-icons/fi';
 import DashboardCharts from "./DashboardCharts";
 import DateFilter from "./Date";
 import SiteFooter from "./SiteFooter";
-import {getToken} from "./authStorage";
+import { getToken } from "./authStorage";
+
+// Export libs (text-first CV style)
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import html2canvas from 'html2canvas';
+import {
+  Document, Packer, Paragraph, TextRun, HeadingLevel, ImageRun,
+  Table, TableRow, TableCell, WidthType, AlignmentType
+} from 'docx';
 
 function UserDetailsPage() {
   const { userId, username } = useParams();
@@ -27,14 +36,23 @@ function UserDetailsPage() {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
 
-  // NEW
+  // Activities
   const [activitiesOpen, setActivitiesOpen] = useState(false);
   const [activities, setActivities] = useState([]);
   const [activitiesLimit, setActivitiesLimit] = useState(100);
   const [isLoading, setIsLoading] = useState(false);
 
-  // const token = localStorage.getItem('custom_token');
-    const token = getToken()
+  // Only used to snapshot charts for export
+  const chartsRef = useRef(null);
+
+  // ---- Company header config ----
+  const COMPANY = {
+    name: 'Insider Monitor',
+    // Use a local asset or a CORS-enabled URL:
+    logoUrl: '/logo.png', // e.g., 'http://localhost:8000/static/logo.png'
+  };
+
+  const token = getToken();
   const cfg = { headers: { Authorization: `Bearer ${token}` } };
 
   const resolveAvatar = (pic) => {
@@ -43,20 +61,56 @@ function UserDetailsPage() {
     return `http://localhost:8000${pic.startsWith('/') ? '' : '/'}${pic}`;
   };
 
+  const pad2 = (n) => String(n).padStart(2, '0');
+
   const formatDateTime = (val) => {
     if (!val) return '-';
     try {
       const d = new Date(val);
       if (Number.isNaN(d.getTime())) return String(val);
       const yyyy = d.getFullYear();
-      const mm = String(d.getMonth() + 1).padStart(2, '0');
-      const dd = String(d.getDate()).padStart(2, '0');
-      const hh = String(d.getHours()).padStart(2, '0');
-      const mi = String(d.getMinutes()).padStart(2, '0');
+      const mm = pad2(d.getMonth() + 1);
+      const dd = pad2(d.getDate());
+      const hh = pad2(d.getHours());
+      const mi = pad2(d.getMinutes());
       return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
     } catch {
       return String(val);
     }
+  };
+
+  const formatDateOnly = (d) => {
+    if (!d || Number.isNaN(d.getTime?.())) return '-';
+    const yyyy = d.getFullYear();
+    const mm = pad2(d.getMonth() + 1);
+    const dd = pad2(d.getDate());
+    return `${yyyy}-${mm}-${dd}`;
+  };
+
+  const getCurrentMonthRange = () => {
+    const now = new Date();
+    const start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0);
+    const end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+    return { start, end };
+  };
+
+  const getEffectiveRange = () => {
+    if (startDate || endDate) {
+      const start = startDate ? new Date(startDate) : new Date('1970-01-01T00:00:00');
+      const end = endDate ? new Date(endDate) : new Date();
+      end.setHours(23, 59, 59, 999);
+      return {
+        start, end,
+        label: `${formatDateOnly(start)} to ${formatDateOnly(end)}`,
+        source: 'selected'
+      };
+    }
+    const { start, end } = getCurrentMonthRange();
+    return {
+      start, end,
+      label: `${formatDateOnly(start)} to ${formatDateOnly(end)}`,
+      source: 'current-month'
+    };
   };
 
   async function fetchUser() {
@@ -66,7 +120,7 @@ function UserDetailsPage() {
       const params = {};
       if (startDate) params.start_date = startDate;
       if (endDate) params.end_date = endDate;
-      params.limit = activitiesLimit; // NEW: pass limit so backend can clamp list size
+      params.limit = activitiesLimit;
 
       if (userId) {
         const res = await axios.get(
@@ -81,7 +135,7 @@ function UserDetailsPage() {
         setBarScores(res.data.barScores || []);
         setBarCounts(res.data.barCounts || []);
         setGroupBy(res.data.groupBy || 'hour');
-        setActivities(res.data.activities || []); // NEW
+        setActivities(res.data.activities || []);
         setIsLoading(false);
         return;
       }
@@ -101,7 +155,7 @@ function UserDetailsPage() {
         setBarScores(d.barScores || []);
         setBarCounts(d.barCounts || []);
         setGroupBy(d.groupBy || 'hour');
-        setActivities(d.activities || []); // NEW
+        setActivities(d.activities || []);
         setIsLoading(false);
         return;
       } catch {}
@@ -137,7 +191,7 @@ function UserDetailsPage() {
       setBarScores(d.barScores || []);
       setBarCounts(d.barCounts || []);
       setGroupBy(d.groupBy || 'hour');
-      setActivities(d.activities || []); // NEW
+      setActivities(d.activities || []);
     } catch (err) {
       console.error('Error fetching user details:', err);
       setError(err?.response?.data?.detail || err.message || 'Failed to load user.');
@@ -149,7 +203,7 @@ function UserDetailsPage() {
 
   useEffect(() => {
     fetchUser();
-  }, [userId, username, startDate, endDate, activitiesLimit]); // NEW: refetch on limit change
+  }, [userId, username, startDate, endDate, activitiesLimit]);
 
   const handleDelete = async () => {
     if (!user) return;
@@ -177,6 +231,334 @@ function UserDetailsPage() {
     }
   };
 
+  // ---- helpers for export assets ----
+  const fetchImageAsDataURL = (url) =>
+    new Promise((resolve) => {
+      if (!url) return resolve(null);
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+        try {
+          resolve(canvas.toDataURL('image/png'));
+        } catch {
+          resolve(null);
+        }
+      };
+      img.onerror = () => resolve(null);
+      img.src = url;
+    });
+
+  const fetchImageAsArrayBuffer = async (url) => {
+    try {
+      const res = await fetch(url, { mode: 'cors' });
+      const blob = await res.blob();
+      return await blob.arrayBuffer();
+    } catch {
+      return null;
+    }
+  };
+
+  // ---------- TEXT-FIRST CV EXPORTS ----------
+  const exportPDF = async () => {
+    if (!user) return;
+
+    const { start, end, label } = getEffectiveRange();
+
+    // Filter activities to effective range (if API didn't already)
+    const filteredActivities = (activities || []).filter(a => {
+      const t = new Date(a.timestamp);
+      return !Number.isNaN(t.getTime()) && t >= start && t <= end;
+    });
+
+    // derive topic types
+    const topicTypes = Array.from(new Set(filteredActivities.map(a => a.activity_type || '—'))).filter(Boolean);
+
+    // cover: company logo (optional)
+    const logoDataUrl = await fetchImageAsDataURL(COMPANY.logoUrl);
+
+    const pdf = new jsPDF({ unit: 'mm', format: 'a4' });
+    const marginL = 18;
+
+    // ---- Cover page ----
+    let y = 24;
+    if (logoDataUrl) {
+      const coverLogoW = 40;
+      const coverLogoH = 40;
+      pdf.addImage(logoDataUrl, 'PNG', marginL, y, coverLogoW, coverLogoH);
+    }
+    pdf.setFont('times', 'bold'); pdf.setFontSize(22);
+    pdf.text(`${COMPANY.name}`, marginL + 48, y + 10);
+    pdf.setFontSize(16);
+    pdf.text(`User Report`, marginL + 48, y + 20);
+
+    y += 54;
+    pdf.setFont('times', 'normal'); pdf.setFontSize(12);
+    pdf.text(`Username: ${user.username}`, marginL, y); y += 7;
+    const fullName = [user.first_name, user.last_name].filter(Boolean).join(' ') || '—';
+    pdf.text(`Full name: ${fullName}`, marginL, y); y += 7;
+    pdf.text(`Generated: ${formatDateTime(new Date())}`, marginL, y); y += 7;
+    pdf.text(`Duration: ${label}`, marginL, y); y += 10;
+
+    pdf.setFont('times', 'bold'); pdf.setFontSize(13);
+    pdf.text('Topics in this report:', marginL, y); y += 7;
+    pdf.setFont('times', 'normal'); pdf.setFontSize(12);
+    const builtInTopics = ['Personal Information', 'Summary', 'Recent Activities', 'Charts & Diagrams'];
+    [...builtInTopics, ...(topicTypes.length ? ['— Activity Types: ' + topicTypes.join(', ')] : [])].forEach(line => {
+      pdf.text(`• ${line}`, marginL, y);
+      y += 6;
+    });
+
+    // ---- Section: Personal Information ----
+    pdf.addPage();
+    y = 24;
+    pdf.setFont('times', 'bold'); pdf.setFontSize(15);
+    pdf.text('Personal Information', marginL, y); y += 8;
+    pdf.setFont('times', 'normal'); pdf.setFontSize(11);
+
+    const infoRows = [
+      ['User ID', String(user.id ?? '—')],
+      ['Email', user.email || '—'],
+      ['Department', user.department || '—'],
+      ['Role', user.role || '—'],
+      ['Address', user.address || '—'],
+      ['Account Created', formatDateTime(user.created_at)],
+      ['Failed Login At', formatDateTime(user.failed_login_timestamp)],
+      ['Active', user.is_active ? 'Yes' : 'No'],
+      ['Suspended', user.is_suspended ? 'Yes' : 'No'],
+    ];
+    infoRows.forEach(([k, v]) => {
+      if (y > 280) { pdf.addPage(); y = 24; }
+      pdf.setFont('times', 'bold'); pdf.text(`${k}:`, marginL, y);
+      pdf.setFont('times', 'normal'); pdf.text(String(v), marginL + 38, y);
+      y += 6;
+    });
+
+    // ---- Section: Summary ----
+    if (y > 260) { pdf.addPage(); y = 24; }
+    y += 4;
+    pdf.setFont('times', 'bold'); pdf.setFontSize(15);
+    pdf.text('Summary', marginL, y); y += 8;
+    pdf.setFont('times', 'normal'); pdf.setFontSize(11);
+    const summaryLines = [
+      `Duration: ${label}`,
+      `Grouped by: ${groupBy || 'hour'}`,
+      `Logs included: ${filteredActivities.length}`,
+    ];
+    summaryLines.forEach(t => { pdf.text(t, marginL, y); y += 6; });
+
+    // ---- Section: Recent Activities (table) ----
+    pdf.addPage();
+    pdf.setFont('times', 'bold'); pdf.setFontSize(15);
+    pdf.text('Recent Activities', marginL, 18);
+
+    const tableBody = filteredActivities.map(a => ([
+      formatDateTime(a.timestamp),
+      a.activity_type || '—',
+      a.details ? String(a.details) : '—',
+      a.ip_address || '—',
+      a.is_suspicious ? 'Yes' : 'No',
+    ]));
+
+    autoTable(pdf, {
+      startY: 24,
+      margin: { left: marginL, right: marginL },
+      head: [['Time', 'Type', 'Details', 'IP', 'Suspicious']],
+      body: tableBody,
+      headStyles: { fillColor: [255, 255, 255], textColor: [0, 0, 0], lineWidth: 0.1, halign: 'left' },
+      styles: { font: 'times', fontSize: 10, textColor: [0, 0, 0], cellPadding: 2 },
+      columnStyles: {
+        0: { cellWidth: 35 },
+        1: { cellWidth: 28 },
+        2: { cellWidth: 90 },
+        3: { cellWidth: 25 },
+        4: { cellWidth: 18, halign: 'center' },
+      },
+      didDrawPage: () => {
+        pdf.setFontSize(9);
+        pdf.setTextColor(100);
+        // running header
+        const header = `${COMPANY.name} • User Report • ${label}`;
+        pdf.text(header, marginL, 10);
+        // running footer
+        const str = `Page ${pdf.internal.getNumberOfPages()}`;
+        pdf.text(str, 210 - marginL, 290, { align: 'right' });
+      }
+    });
+
+    // ---- Section: Charts ----
+    if (chartsRef?.current) {
+      pdf.addPage();
+      pdf.setFont('times', 'bold'); pdf.setFontSize(15);
+      pdf.text('Charts & Diagrams', marginL, 18);
+
+      const canvas = await html2canvas(chartsRef.current, { scale: 2, backgroundColor: '#ffffff' });
+      const img = canvas.toDataURL('image/png');
+      const pageWidth = pdf.internal.pageSize.getWidth() - marginL * 2;
+      const h = (canvas.height * pageWidth) / canvas.width;
+      const maxH = 210 - 40;
+      const drawH = Math.min(h, maxH);
+      pdf.addImage(img, 'PNG', marginL, 26, pageWidth, drawH);
+    }
+
+    const fn = `user_${user.username}_cv_${label.replaceAll('-', '').replaceAll(' ', '').replaceAll('to', '-')}.pdf`;
+    pdf.save(fn);
+  };
+
+  const dataUrlToArrayBuffer = (dataUrl) => {
+    const base64 = dataUrl.split(',')[1];
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes.buffer;
+  };
+
+  const exportDOCX = async () => {
+    if (!user) return;
+
+    const { start, end, label } = getEffectiveRange();
+
+    const filteredActivities = (activities || []).filter(a => {
+      const t = new Date(a.timestamp);
+      return !Number.isNaN(t.getTime()) && t >= start && t <= end;
+    });
+    const topicTypes = Array.from(new Set(filteredActivities.map(a => a.activity_type || '—'))).filter(Boolean);
+
+    // Company logo
+    const logoBuf = await fetchImageAsArrayBuffer(COMPANY.logoUrl);
+
+    const kv = (k, v) => new TableRow({
+      children: [
+        new TableCell({ children: [new Paragraph({ text: k, bold: true })] }),
+        new TableCell({ children: [new Paragraph(String(v ?? '—'))] }),
+      ]
+    });
+
+    const fullName = [user.first_name, user.last_name].filter(Boolean).join(' ') || '—';
+
+    const infoTable = new Table({
+      width: { size: 100, type: WidthType.PERCENTAGE },
+      rows: [
+        kv('Username', user.username),
+        kv('Full name', fullName),
+        kv('User ID', user.id),
+        kv('Email', user.email),
+        kv('Department', user.department),
+        kv('Role', user.role),
+        kv('Address', user.address),
+        kv('Account Created', formatDateTime(user.created_at)),
+        kv('Failed Login At', formatDateTime(user.failed_login_timestamp)),
+        kv('Active', user.is_active ? 'Yes' : 'No'),
+        kv('Suspended', user.is_suspended ? 'Yes' : 'No'),
+      ]
+    });
+
+    // Activity table
+    const activityHeader = new TableRow({
+      children: ['Time', 'Type', 'Details', 'IP', 'Suspicious'].map(h =>
+        new TableCell({ children: [new Paragraph({ text: h, bold: true })] })
+      )
+    });
+
+    const activityRows = filteredActivities.map(a => new TableRow({
+      children: [
+        new TableCell({ children: [new Paragraph(formatDateTime(a.timestamp))] }),
+        new TableCell({ children: [new Paragraph(a.activity_type || '—')] }),
+        new TableCell({ children: [new Paragraph(String(a.details || '—'))] }),
+        new TableCell({ children: [new Paragraph(a.ip_address || '—')] }),
+        new TableCell({ children: [new Paragraph(a.is_suspicious ? 'Yes' : 'No')] }),
+      ]
+    }));
+
+    const activityTable = new Table({
+      width: { size: 100, type: WidthType.PERCENTAGE },
+      rows: [activityHeader, ...activityRows]
+    });
+
+    // Optional chart image
+    let chartParagraph = null;
+    if (chartsRef?.current) {
+      const canvas = await html2canvas(chartsRef.current, { scale: 2, backgroundColor: '#ffffff' });
+      const data = dataUrlToArrayBuffer(canvas.toDataURL('image/png'));
+      const targetW = 600;
+      const targetH = Math.round((canvas.height * targetW) / canvas.width);
+      chartParagraph = new Paragraph({
+        children: [new ImageRun({ data, transformation: { width: targetW, height: targetH } })],
+        alignment: AlignmentType.CENTER
+      });
+    }
+
+    const children = [];
+
+    // Logo header
+    if (logoBuf) {
+      children.push(
+        new Paragraph({
+          children: [new ImageRun({ data: logoBuf, transformation: { width: 120, height: 120 } })],
+          alignment: AlignmentType.LEFT
+        })
+      );
+    }
+
+    // Title + meta
+    children.push(
+      new Paragraph({ text: `${COMPANY.name}`, heading: HeadingLevel.HEADING_2 }),
+      new Paragraph({ text: `User Report`, heading: HeadingLevel.TITLE }),
+      new Paragraph({ text: `Username: ${user.username}` }),
+      new Paragraph({ text: `Full name: ${fullName}` }),
+      new Paragraph({ text: `Generated: ${formatDateTime(new Date())}` }),
+      new Paragraph({ text: `Duration: ${label}`, spacing: { after: 300 } }),
+    );
+
+    // Topics
+    children.push(new Paragraph({ text: `Topics in this report:`, heading: HeadingLevel.HEADING_2 }));
+    const builtInTopics = ['Personal Information', 'Summary', 'Recent Activities', 'Charts & Diagrams'];
+    [...builtInTopics, ...(topicTypes.length ? ['Activity Types: ' + topicTypes.join(', ')] : [])]
+      .forEach(t => children.push(new Paragraph(`• ${t}`)));
+    children.push(new Paragraph({ text: '' }));
+
+    // Personal Info
+    children.push(new Paragraph({ text: 'Personal Information', heading: HeadingLevel.HEADING_2 }));
+    children.push(infoTable);
+    children.push(new Paragraph({ text: '' }));
+
+    // Summary
+    children.push(new Paragraph({ text: 'Summary', heading: HeadingLevel.HEADING_2 }));
+    children.push(new Paragraph(`Duration: ${label}`));
+    children.push(new Paragraph(`Grouped by: ${groupBy || 'hour'}`));
+    children.push(new Paragraph(`Logs included: ${filteredActivities.length}`));
+    children.push(new Paragraph({ text: '' }));
+
+    // Activities
+    children.push(new Paragraph({ text: 'Recent Activities', heading: HeadingLevel.HEADING_2 }));
+    children.push(activityTable);
+    children.push(new Paragraph({ text: '' }));
+
+    // Charts
+    if (chartParagraph) {
+      children.push(new Paragraph({ text: 'Charts & Diagrams', heading: HeadingLevel.HEADING_2 }));
+      children.push(chartParagraph);
+    }
+
+    const doc = new Document({
+      sections: [{ properties: {}, children }]
+    });
+
+    const blob = await Packer.toBlob(doc);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const fn = `user_${user.username}_cv_${label.replaceAll('-', '').replaceAll(' ', '').replaceAll('to', '-')}.docx`;
+    a.href = url;
+    a.download = fn;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // ---------- RENDER ----------
   if (error) {
     return (
       <div style={{ minHeight: '100vh', background: 'var(--im-bg)', color: 'var(--im-text)' }}>
@@ -201,7 +583,6 @@ function UserDetailsPage() {
   if (!user) {
     return (
       <div style={{ minHeight: '100vh', background: 'var(--im-bg)', color: 'var(--im-text)' }}>
-
         <div style={{ textAlign: 'center', marginTop: '3rem' }}>Loading…</div>
         <SiteFooter />
       </div>
@@ -214,10 +595,26 @@ function UserDetailsPage() {
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--im-bg)', color: 'var(--im-text)', display: 'flex', flexDirection: 'column' }}>
-
-
       <main style={{ flex: 1 }}>
-        <div className="p-8">
+        <div className="p-8" style={{ maxWidth: 1100, margin: '0 auto' }}>
+          {/* Export toolbar */}
+          <div className="flex justify-end gap-2 mb-4">
+            <button
+              onClick={exportPDF}
+              className="text-sm font-medium px-3 py-2 rounded"
+              style={{ border: '1px solid var(--im-border)', background: 'var(--im-surface)', color: 'var(--im-text)' }}
+            >
+              ⬇️ Export CV (PDF)
+            </button>
+            <button
+              onClick={exportDOCX}
+              className="text-sm font-medium px-3 py-2 rounded"
+              style={{ border: '1px solid var(--im-border)', background: 'var(--im-surface)', color: 'var(--im-text)' }}
+            >
+              ⬇️ Export CV (.docx)
+            </button>
+          </div>
+
           {/* Profile Card */}
           <div
             className="rounded-lg p-6 shadow-md mb-6"
@@ -230,6 +627,7 @@ function UserDetailsPage() {
                 <img
                   src={avatarUrl}
                   alt={`${user.username} profile`}
+                  crossOrigin="anonymous"
                   style={{
                     width: 88, height: 88, borderRadius: '999px', objectFit: 'cover',
                     border: '1px solid var(--im-border)', background: 'var(--im-surface)'
@@ -281,9 +679,18 @@ function UserDetailsPage() {
           >
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-lg font-semibold" style={{ color: 'var(--im-text)', margin: 0 }}>Personal Information</h3>
-              <button className="flex items-center text-sm font-medium" style={{ color: 'var(--im-accent)' }}>
-                Edit <FiEdit2 className="ml-1" />
-              </button>
+              {/*<button className="flex items-center text-sm font-medium" style={{ color: 'var(--im-accent)' }}>*/}
+              {/*  Edit <FiEdit2 className="ml-1" />*/}
+              {/*</button>*/}
+                <button
+                  className="flex items-center text-sm font-medium"
+                  style={{ color: 'var(--im-accent)' }}
+                  onClick={() => navigate(`/users/${user?.id || userId}/edit`)}
+
+                >
+                  Edit <FiEdit2 className="ml-1" />
+                </button>
+
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm" style={{ color: 'var(--im-text)' }}>
@@ -302,7 +709,6 @@ function UserDetailsPage() {
               <div><strong>Failed Login At:</strong><br />{formatDateTime(user.failed_login_timestamp)}</div>
               <div><strong>Active:</strong><br />{user.is_active ? 'Yes' : 'No'}</div>
 
-              {/* Suspended Toggle */}
               <div className="col-span-1">
                 <strong>Suspended:</strong><br />
                 <select
@@ -328,7 +734,7 @@ function UserDetailsPage() {
             </div>
           </div>
 
-          {/* NEW: Activities Toggle & List */}
+          {/* Activities */}
           <div
             className="rounded-lg p-6 shadow-md mb-6"
             style={{ background: 'var(--im-surface)', border: '1px solid var(--im-border)' }}
@@ -401,8 +807,9 @@ function UserDetailsPage() {
             )}
           </div>
 
-          {/* Charts Section */}
+          {/* Charts (for export snapshot) */}
           <div
+            ref={chartsRef}
             className="rounded-lg p-6 shadow-md"
             style={{ background: 'var(--im-surface)', border: '1px solid var(--im-border)' }}
           >
