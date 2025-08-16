@@ -9,15 +9,14 @@ import SoundUnlocker from './SoundUnlocker';
 export default function Navbar({ setAuth }) {
   const location = useLocation();
   const navigate = useNavigate();
-  const [mobileOpen, setMobileOpen] = useState(false);
-  // const a = new Audio('/sounds/siren-alert-96052.mp3'); a.volume = 0.8; a.play()
 
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [scrolled, setScrolled] = useState(false);
 
   // 🔔 realtime bits
   const { emergency, soundMuted, toggleSound } = useAlerts();
-
-  // 👉 visible only when sound is actually happening
-  const isSounding = emergency && !soundMuted;
+  // Show the chip whenever an emergency is active (muted OR not)
+  const showSoundChip = !!emergency;
 
   // theme setup
   const getInitialTheme = () => {
@@ -40,12 +39,23 @@ export default function Navbar({ setAuth }) {
   // close drawer on route change
   useEffect(() => setMobileOpen(false), [location.pathname]);
 
-  const isActive = (path) => location.pathname === path;
+  // lock page scroll when drawer is open
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = mobileOpen ? 'hidden' : prev || '';
+    return () => { document.body.style.overflow = prev; };
+  }, [mobileOpen]);
 
-  const go = (path) => {
-    navigate(path);
-    setMobileOpen(false);
-  };
+  // subtle shadow on scroll
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 4);
+    window.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
+  const isActive = (path) => location.pathname === path;
+  const go = (path) => { navigate(path); setMobileOpen(false); };
 
   const onLogout = () => {
     clearToken();
@@ -54,7 +64,7 @@ export default function Navbar({ setAuth }) {
   };
 
   return (
-    <nav className="im-nav">
+    <nav className={`im-nav ${scrolled ? 'is-scrolled' : ''}`}>
       <div className="im-nav__shell">
         {/* Left: brand + hamburger */}
         <div className="im-nav__left">
@@ -65,9 +75,7 @@ export default function Navbar({ setAuth }) {
             aria-controls="im-mobile-drawer"
             onClick={() => setMobileOpen((o) => !o)}
           >
-            <span />
-            <span />
-            <span />
+            <span /><span /><span />
           </button>
 
           <div
@@ -76,69 +84,31 @@ export default function Navbar({ setAuth }) {
             role="button"
             tabIndex={0}
             onKeyDown={(e) => e.key === 'Enter' && go('/')}
-            style={{ position: 'relative' }}
           >
             <span className="im-brand__main">Insider</span>
             <span className="im-brand__accent">Monitor</span>
 
-            {/* 🔴 tiny emergency dot when flashing is active */}
+            {/* tiny emergency dot */}
             {emergency && (
-              <span
-                title="High-severity alert active"
-                style={{
-                  position: 'absolute',
-                  right: -10, top: -4,
-                  width: 10, height: 10, borderRadius: 999,
-                  background: '#ef4444', boxShadow: '0 0 0 4px rgba(239,68,68,.25)'
-                }}
-              />
+              <span className="im-brand__dot" title="High-severity alert active" />
             )}
           </div>
         </div>
 
         {/* Center: desktop links */}
         <div className="im-nav__links">
-          <button className={`im-nav__link ${isActive('/') ? 'is-active' : ''}`} onClick={() => go('/')}>
-            Dashboard
-          </button>
-          <button className={`im-nav__link ${isActive('/users') ? 'is-active' : ''}`} onClick={() => go('/users')}>
-            Users
-          </button>
-          <button className={`im-nav__link ${isActive('/alerts') ? 'is-active' : ''}`} onClick={() => go('/alerts')}>
-            Alerts
-          </button>
-          <button className={`im-nav__link ${isActive('/analyze') ? 'is-active' : ''}`} onClick={() => go('/analyze')}>
-            Analyze
-          </button>
-          <button
-            className={`im-nav__link ${isActive('/settings/realtime') ? 'is-active' : ''}`}
-            onClick={() => go('/settings/realtime')}
-          >
-            Realtime Settings
-          </button>
-            <SoundUnlocker />
+          <button className={`im-nav__link ${isActive('/') ? 'is-active' : ''}`} onClick={() => go('/')}>Dashboard</button>
+          <button className={`im-nav__link ${isActive('/users') ? 'is-active' : ''}`} onClick={() => go('/users')}>Users</button>
+          <button className={`im-nav__link ${isActive('/alerts') ? 'is-active' : ''}`} onClick={() => go('/alerts')}>Alerts</button>
+          {/*<button className={`im-nav__link ${isActive('/analyze') ? 'is-active' : ''}`} onClick={() => go('/analyze')}>Analyze</button>*/}
+          <button className={`im-nav__link ${isActive('/settings/realtime') ? 'is-active' : ''}`} onClick={() => go('/settings/realtime')}>Realtime Settings</button>
+          {/*<SoundUnlocker />*/}
         </div>
 
-        {/* Right: actions + theme + (conditional) sound */}
+        {/* Right: actions + theme */}
         <div className="im-nav__actions">
-          {/* ✅ Only shows while sound is actually playing */}
-          {isSounding && (
-            <button
-              onClick={toggleSound}
-              className="im-btn im-btn--light im-hide-mobile"
-              title="Mute alert sound"
-              aria-label="Mute alert sound"
-            >
-              🔇 Mute
-            </button>
-          )}
-
-          <button onClick={() => go('/log')} className="im-btn im-btn--light im-hide-mobile">
-            + Log
-          </button>
-          <button onClick={onLogout} className="im-btn im-btn--alert im-hide-mobile">
-            Logout
-          </button>
+          <button onClick={() => go('/session')} className="im-btn im-btn--light im-hide-mobile">+ Log</button>
+          <button onClick={onLogout} className="im-btn im-btn--alert im-hide-mobile">Logout</button>
 
           <button
             onClick={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
@@ -150,6 +120,20 @@ export default function Navbar({ setAuth }) {
             <span className="im-toggle__label">{theme === 'dark' ? 'Dark' : 'Light'}</span>
           </button>
         </div>
+
+        {/* 🔊 Tiny floating sound chip */}
+        {showSoundChip && (
+          <button
+            className="im-sound-chip"
+            data-muted={soundMuted ? 'true' : 'false'}
+            onClick={toggleSound}
+            title={soundMuted ? 'Unmute alert sound' : 'Mute alert sound'}
+            aria-label={soundMuted ? 'Unmute alert sound' : 'Mute alert sound'}
+          >
+            <span className="im-sr-only">{soundMuted ? 'Unmute' : 'Mute'} alert sound</span>
+            {soundMuted ? '🔇' : '🔊'}
+          </button>
+        )}
       </div>
 
       {/* Mobile drawer */}
@@ -160,39 +144,15 @@ export default function Navbar({ setAuth }) {
         aria-modal="true"
       >
         <div className="im-nav__drawer-inner">
-          <button className={`im-nav__link ${isActive('/') ? 'is-active' : ''}`} onClick={() => go('/')}>
-            Dashboard
-          </button>
-          <button className={`im-nav__link ${isActive('/users') ? 'is-active' : ''}`} onClick={() => go('/users')}>
-            Users
-          </button>
-          <button className={`im-nav__link ${isActive('/alerts') ? 'is-active' : ''}`} onClick={() => go('/alerts')}>
-            Alerts
-          </button>
-          <button className={`im-nav__link ${isActive('/analyze') ? 'is-active' : ''}`} onClick={() => go('/analyze')}>
-            Analyze
-          </button>
-          <button
-            className={`im-nav__link ${isActive('/settings/realtime') ? 'is-active' : ''}`}
-            onClick={() => go('/settings/realtime')}
-          >
-            Realtime Settings
-          </button>
+          <button className={`im-nav__link ${isActive('/') ? 'is-active' : ''}`} onClick={() => go('/')}>Dashboard</button>
+          <button className={`im-nav__link ${isActive('/users') ? 'is-active' : ''}`} onClick={() => go('/users')}>Users</button>
+          <button className={`im-nav__link ${isActive('/alerts') ? 'is-active' : ''}`} onClick={() => go('/alerts')}>Alerts</button>
+          <button className={`im-nav__link ${isActive('/analyze') ? 'is-active' : ''}`} onClick={() => go('/analyze')}>Analyze</button>
+          <button className={`im-nav__link ${isActive('/settings/realtime') ? 'is-active' : ''}`} onClick={() => go('/settings/realtime')}>Realtime Settings</button>
 
           <div className="im-nav__drawer-actions">
-            {/* 🔊 Mobile mute (only when sound is playing) */}
-            {isSounding && (
-              <button onClick={toggleSound} className="im-btn im-btn--light">
-                🔇 Mute
-              </button>
-            )}
-
-            <button onClick={() => go('/log')} className="im-btn im-btn--light">
-              + Log
-            </button>
-            <button onClick={onLogout} className="im-btn im-btn--alert">
-              Logout
-            </button>
+            <button onClick={() => go('/log')} className="im-btn im-btn--light">+ Log</button>
+            <button onClick={onLogout} className="im-btn im-btn--alert">Logout</button>
           </div>
         </div>
       </div>

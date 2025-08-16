@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useState, useRef } from "react";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
-import DateFilter from "./Date";              // reuse your dashboard DateFilter
-import { getToken } from "./authStorage";
+import DateFilter from "./Date";
+import { getToken, clearToken } from "./authStorage";
 import "../App.css";
 
 /* --- tiny inline icons (no deps) --- */
@@ -27,7 +27,7 @@ function decodeJwtUserId(token) {
   try {
     const [, payload] = token.split(".");
     const json = JSON.parse(atob(payload.replace(/-/g, "+").replace(/_/g, "/")));
-    return json.user_id || json.sub || json.uid || null;
+    return json.user_id ?? json.sub ?? json.uid ?? null;
   } catch {
     return null;
   }
@@ -59,6 +59,23 @@ export default function EmployeeDashboard() {
   const menuRef = useRef(null);
   const navigate = useNavigate();
 
+  // ---- THEME (same classes/storage key as Navbar) ----
+  const getInitialTheme = () => {
+    const saved = localStorage.getItem("im_theme");
+    if (saved) return saved;
+    return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches
+      ? "dark"
+      : "light";
+  };
+  const [theme, setTheme] = useState(getInitialTheme);
+  useEffect(() => {
+    localStorage.setItem("im_theme", theme);
+    const root = document.documentElement;
+    root.classList.remove("im-theme-dark", "im-theme-light");
+    root.classList.add(theme === "dark" ? "im-theme-dark" : "im-theme-light");
+    window.dispatchEvent(new CustomEvent("im-theme-changed", { detail: { theme } }));
+  }, [theme]);
+
   // close profile dropdown on outside click
   useEffect(() => {
     const onDoc = (e) => {
@@ -75,46 +92,72 @@ export default function EmployeeDashboard() {
     setEndDate(today);
   }, []);
 
+  // ---- robust logout ----
+  const broadcastLogoutToOtherTabs = () => {
+    try {
+      localStorage.setItem("im_logout_ping", String(Date.now()));
+    } catch {}
+  };
+
+  const handleLogout = () => {
+    try {
+      clearToken?.(); // your helper clears the main token
+      localStorage.removeItem("custom_token"); // clear any ad-hoc token too
+      broadcastLogoutToOtherTabs();
+    } finally {
+      // hard navigation guarantees App re-reads token = null and sets auth false
+      window.location.replace("/login");
+    }
+  };
+
   // fetch profile + alerts
   const fetchEverything = async () => {
     setLoading(true);
     setErr("");
     try {
-      const token = getToken() || localStorage.getItem("custom_token");
-      const uid = decodeJwtUserId(token);
+      const rawToken = getToken() || localStorage.getItem("custom_token");
+      if (!rawToken) {
+        handleLogout();
+        return;
+      }
+      const authHeader = rawToken.startsWith("Bearer ") ? rawToken : `Bearer ${rawToken}`;
+      const cfg = { headers: { Authorization: authHeader } };
 
-      // 1) profile
-      // Your working endpoint from earlier messages:
-      //   GET /api/users/<id>/detail/
-      const profileRes = uid
-        ? await axios.get(`http://localhost:8000/api/users/${uid}/detail/`, {
-            headers: { Authorization: `Bearer ${token}` },
-          })
-        : { data: {} };
+      // Try to get user id from JWT; if not, fall back to /auth/me/
+      let uid = decodeJwtUserId(rawToken);
+      if (!uid) {
+        try {
+          const me = await axios.get("http://localhost:8000/auth/me/", cfg);
+          const meData = me?.data?.user || me?.data || {};
+          uid = meData.id ?? null;
+        } catch (e) {
+          if (e?.response?.status === 401) return handleLogout();
+          throw e;
+        }
+      }
 
-      // normalize profile shape defensively
-      const p = profileRes.data || {};
+      // 1) profile — your backend returns { user: {...}, ... }
+      const profileRes = await axios.get(`http://localhost:8000/api/users/${uid}/detail/`, cfg);
+      const pRoot = profileRes.data?.user || profileRes.data || {};
       const normProfile = {
-        id: p.id ?? uid ?? null,
-        username: p.username ?? p.user?.username ?? "User",
-        email: p.email ?? p.user?.email ?? "",
-        department: p.department ?? p.user?.department ?? "",
-        role: p.role ?? p.user?.role ?? "",
+        id: pRoot.id ?? uid ?? null,
+        username: pRoot.username ?? pRoot.user?.username ?? "User",
+        email: pRoot.email ?? pRoot.user?.email ?? "",
+        department: pRoot.department ?? pRoot.user?.department ?? "",
+        role: pRoot.role ?? pRoot.user?.role ?? "",
         joined_at:
-          p.created_at || p.date_joined || p.user?.created_at || p.user?.date_joined || "",
+          pRoot.created_at || pRoot.date_joined || pRoot.user?.created_at || pRoot.user?.date_joined || "",
       };
       setProfile(normProfile);
 
       // 2) alerts (client-side filter to "my" alerts)
-      // Your existing endpoint:
-      //   GET /api/alerts/?start_date=&end_date=
       const alertsRes = await axios.get("http://localhost:8000/api/alerts/", {
-        headers: { Authorization: `Bearer ${token}` },
+        ...cfg,
         params: {
           ...(startDate && { start_date: startDate }),
           ...(endDate && { end_date: endDate }),
           page: 1,
-          page_size: 100, // pull enough; we’ll filter locally to the user
+          page_size: 100,
         },
       });
 
@@ -132,19 +175,23 @@ export default function EmployeeDashboard() {
         assigned_to: coerceUser(a.assigned_to),
       }));
 
-      // keep alerts that belong to this user:
-      // - either actor (log.user) matches profile.id or username
-      // - or assigned_to matches current user
+      const myId = normProfile.id;
+      const myUname = normProfile.username;
+
+      // keep alerts for me (actor or assignee)
       const mine = normalized.filter((a) => {
-        const uidMatch =
-          (profileRes.data?.id && (a.user?.id === profileRes.data.id || a.assigned_to?.id === profileRes.data.id)) ||
-          (uid && (a.user?.id === uid || a.assigned_to?.id === uid));
-        const unameMatch = normProfile.username && (a.user?.username === normProfile.username);
-        return uidMatch || unameMatch;
+        const byId = myId && (a.user?.id === myId || a.assigned_to?.id === myId);
+        const byName = myUname && a.user?.username === myUname;
+        return byId || byName;
       });
 
       setAlerts(mine);
     } catch (e) {
+      const status = e?.response?.status;
+      if (status === 401) {
+        handleLogout();
+        return;
+      }
       console.error("employee dashboard fetch error:", e?.response?.data || e);
       setErr("Failed to load your dashboard. Please refresh.");
     } finally {
@@ -167,15 +214,6 @@ export default function EmployeeDashboard() {
 
   const recent = useMemo(() => alerts.slice(0, 6), [alerts]);
 
-  const handleLogout = () => {
-    try {
-      localStorage.removeItem("custom_token");
-      // if you store anywhere else, clear here too
-    } finally {
-      navigate("/login");
-    }
-  };
-
   const initials = (profile?.username || "U").slice(0, 2).toUpperCase();
 
   return (
@@ -190,6 +228,18 @@ export default function EmployeeDashboard() {
         </div>
 
         <div className="ewdash-rightcontrols-sentinelY" ref={menuRef}>
+          {/* Theme toggle (same look/behavior as Navbar) */}
+          <button
+            onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
+            className="im-toggle"
+            title="Toggle theme"
+            aria-label="Toggle theme"
+            style={{ marginRight: 8 }}
+          >
+            <span className="im-toggle__thumb" data-mode={theme} />
+            <span className="im-toggle__label">{theme === "dark" ? "Dark" : "Light"}</span>
+          </button>
+
           <button
             className="ewdash-profilechip-sentinelY"
             onClick={() => setMenuOpen((v) => !v)}
@@ -210,6 +260,8 @@ export default function EmployeeDashboard() {
               >
                 View Profile
               </button>
+
+              {/* If editing is admin-only in your routing guards, keep this; otherwise remove */}
               <button
                 className="ewdash-menubtn-sentinelY"
                 role="menuitem"
@@ -217,7 +269,9 @@ export default function EmployeeDashboard() {
               >
                 Edit Profile
               </button>
+
               <div className="ewdash-menudiv-sentinelY" />
+
               <button
                 className="ewdash-menubtn-sentinelY ewdash-menubtn--alert-sentinelY"
                 role="menuitem"
@@ -317,7 +371,9 @@ export default function EmployeeDashboard() {
               <div className="ewdash-profileavatar-sentinelY">{initials}</div>
               <div className="ewdash-profileinfo-sentinelY">
                 <div className="ewdash-profilename-sentinelY">{profile?.username || "User"}</div>
-                <div className="ewdash-profilemeta-sentinelY">{profile?.role || "Member"}{profile?.department ? ` • ${profile.department}` : ""}</div>
+                <div className="ewdash-profilemeta-sentinelY">
+                  {profile?.role || "Member"}{profile?.department ? ` • ${profile.department}` : ""}
+                </div>
                 {profile?.email && <div className="ewdash-profilemeta-sentinelY">{profile.email}</div>}
                 {profile?.joined_at && (
                   <div className="ewdash-profilemeta-sentinelY">Joined: {profile.joined_at}</div>
@@ -332,12 +388,12 @@ export default function EmployeeDashboard() {
               >
                 View Profile
               </button>
-              <button
-                className="ewdash-ghostbtn-sentinelY"
-                onClick={() => navigate(`/users/${profile?.id || ""}/edit`)}
-              >
-                Edit Profile
-              </button>
+              {/*<button*/}
+              {/*  className="ewdash-ghostbtn-sentinelY"*/}
+              {/*  onClick={() => navigate(`/users/${profile?.id || ""}/edit`)}*/}
+              {/*>*/}
+              {/*  Edit Profile*/}
+              {/*</button>*/}
               <button
                 className="ewdash-dangerbtn-sentinelY"
                 onClick={handleLogout}

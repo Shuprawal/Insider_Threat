@@ -1,11 +1,4 @@
-# hybrid_threat_pipeline_lgbm.py
-# Precision-first insider-threat pipeline:
-# - XGBoost (binary:logistic) with scale_pos_weight
-# - Robust (MAD) per-user z-scores + interaction features
-# - IsolationForest score as an extra feature
-# - GroupKFold by user for hyperparam search, optimizing Precision@rate
-# - Time-aware holdout for final evaluation
-# - No calibration, no SMOTE
+
 
 import os, glob, joblib, numpy as np, pandas as pd, argparse, json
 from datetime import datetime

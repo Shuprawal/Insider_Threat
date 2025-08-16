@@ -11,7 +11,7 @@ from .views import (
     DeleteUserView,
     AdministrativeUserProfileEditView,
     forgot_password,
-    password_reset_confirm,
+    password_reset_confirm, me_view,
 )
 
 app_name = "users"
@@ -34,12 +34,16 @@ urlpatterns = [
 
     path('users/<int:user_id>/detail/', UserDetailView.as_view(), name='user-detail'),
 
+    path('users/<int:user_id>/suspend/', SuspendUserView.as_view(), name='suspend'),
+
     # ✅ EDIT endpoints (GET edit payload; PATCH/PUT/POST update)
     # Include both with and without trailing slash just in case APPEND_SLASH is off
     path('users/<int:user_id>/edit/', AdministrativeUserProfileEditView.as_view(), name='user-edit'),
     path('users/<int:user_id>/edit', AdministrativeUserProfileEditView.as_view(), name='user-edit-no-slash'),
 
+    path('users/<int:user_id>/delete/', DeleteUserView.as_view(), name='user-delete'),
     # Optional: allow root form too (PATCH /api/users/:id/)
     path('users/view/', CustomUserView.as_view(), name='users_view'),
     path('users/<int:user_id>/', AdministrativeUserProfileEditView.as_view(), name='user-edit-root'),
+    path('auth/me/', me_view, name='me-view'),
 ]

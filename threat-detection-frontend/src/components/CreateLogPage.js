@@ -32,7 +32,7 @@ export default function CreateLogPage({ setAuth }) {
       try {
         // const token = localStorage.getItem('custom_token');
           const token = getToken()
-        const res = await axios.get(`${API_BASE}/api/users/`, {
+        const res = await axios.get(`${API_BASE}/api/userslist/`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         setUsers(res.data || []);

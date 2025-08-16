@@ -1,104 +1,110 @@
 import React, { useState } from 'react';
 import api from './api';
-import { saveToken } from './authStorage';
+import {
+  saveTokenToStorageMain,
+  saveAuthPayloadToStorageMain
+} from './authStorage';
 import { Link, useNavigate } from 'react-router-dom';
+import '../App.css';
 
 function Login({ setAuth }) {
-  const [identifier, setIdentifier] = useState(''); // email or username
-  const [password, setPassword] = useState('');
-  const [rememberMe, setRememberMe] = useState(true);
-  const [error, setError] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [loginIdentifierValue, setLoginIdentifierValue] = useState('');
+  const [loginPasswordValue, setLoginPasswordValue] = useState('');
+  const [rememberMeFlagValue, setRememberMeFlagValue] = useState(true);
+  const [loginErrorMessageValue, setLoginErrorMessageValue] = useState('');
+  const [isLoginSubmittingState, setIsLoginSubmittingState] = useState(false);
   const navigate = useNavigate();
 
-  const handleSubmit = async (e) => {
+  const handleLoginFormSubmit = async (e) => {
     e.preventDefault();
-    setIsSubmitting(true);
-    setError('');
+    setIsLoginSubmittingState(true);
+    setLoginErrorMessageValue('');
     try {
       const { data } = await api.post('/api/custom-login/', {
-        // backend will accept either username or email in this field
-        identifier: identifier.trim(),
-        password,
+        identifier: loginIdentifierValue.trim(),
+        password: loginPasswordValue,
       });
 
       if (data?.token) {
-        saveToken(data.token, rememberMe);
+        saveTokenToStorageMain(data.token, rememberMeFlagValue);
+        saveAuthPayloadToStorageMain(data.user);
+
         setAuth?.(true);
-        navigate('/', { replace: true });
+        navigate(data.redirect_to || '/', { replace: true });
       } else {
-        setError('No token received from server.');
+        setLoginErrorMessageValue('No token received from server.');
       }
     } catch (err) {
-      setError(err.response?.data?.error || 'Invalid credentials. Please try again.');
+      setLoginErrorMessageValue(err.response?.data?.error || 'Invalid credentials. Please try again.');
     } finally {
-      setIsSubmitting(false);
+      setIsLoginSubmittingState(false);
     }
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-900 via-blue-900 to-gray-800">
-      <div className="bg-white p-8 rounded-2xl shadow-2xl w-full max-w-md">
-        <h2 className="text-3xl font-extrabold text-center text-gray-800 mb-1">Insider Threat Detection</h2>
-        <p className="text-center text-gray-500 mb-6">Secure Access Portal</p>
+    <div className="itddsLoginPage-outerContainerBackgroundGradient">
+      <div className="itddsLoginCard-surfaceShadowRounded">
+        <h2 className="itddsLogin-headingPrimary">Insider Threat Detection</h2>
+        <p className="itddsLogin-subheadingSecondary">Secure Access Portal</p>
 
-        {error && (
-          <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-6 rounded-r-lg">
-            <p>{error}</p>
+        {loginErrorMessageValue && (
+          <div className="itddsLogin-errorContainerProminent">
+            <p>{loginErrorMessageValue}</p>
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+        <form onSubmit={handleLoginFormSubmit} className="itddsLogin-formVerticalSpacing">
+          <div className="itddsLogin-formGroupBlock">
+            <label className="itddsLogin-labelTextReadable">
               Email or Username
             </label>
             <input
               type="text"
-              value={identifier}
-              onChange={(e) => setIdentifier(e.target.value)}
-              className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              value={loginIdentifierValue}
+              onChange={(e) => setLoginIdentifierValue(e.target.value)}
+              className="itddsLogin-inputFieldEmphasizedVisibility"
               required
+              autoComplete="username"
+              inputMode="email"
             />
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+          <div className="itddsLogin-formGroupBlock">
+            <label className="itddsLogin-labelTextReadable">
               Password
             </label>
             <input
               type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              value={loginPasswordValue}
+              onChange={(e) => setLoginPasswordValue(e.target.value)}
+              className="itddsLogin-inputFieldEmphasizedVisibility"
               required
+              autoComplete="current-password"
             />
           </div>
 
-          <div className="flex items-center justify-between">
-            <label className="flex items-center gap-2 text-sm text-gray-700">
+          <div className="itddsLogin-rowBetweenCheckboxAndLink">
+            <label className="itddsLogin-checkboxWithLabelContainer">
               <input
                 type="checkbox"
-                checked={rememberMe}
-                onChange={(e) => setRememberMe(e.target.checked)}
-                className="h-4 w-4"
+                checked={rememberMeFlagValue}
+                onChange={(e) => setRememberMeFlagValue(e.target.checked)}
+                className="itddsLogin-checkboxInputVisible"
               />
               Remember me on this device
             </label>
 
-            <Link to="/forgot-password" className="text-sm text-blue-600 hover:underline">
+            <Link to="/forgot-password" className="itddsLogin-linkSubtleAction">
               Forgot password?
             </Link>
           </div>
 
           <button
             type="submit"
-            disabled={isSubmitting}
-            className={`w-full bg-blue-600 text-white p-3 rounded-lg transition ${
-              isSubmitting ? 'opacity-50 cursor-not-allowed' : 'hover:bg-blue-700 hover:scale-105'
-            }`}
+            disabled={isLoginSubmittingState}
+            className="itddsLogin-submitButtonPrimary"
           >
-            {isSubmitting ? 'Logging in...' : 'Secure Login'}
+            {isLoginSubmittingState ? 'Logging in...' : 'Secure Login'}
           </button>
         </form>
       </div>

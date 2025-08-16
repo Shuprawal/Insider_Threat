@@ -10,9 +10,9 @@ urlpatterns = [
 
     path("activities/analyze/", AnalyzeUserActivity.as_view(), name="analyze-user-activity"),
 
-    path("sessions/start/", StartUserSession.as_view()),
-    path("sessions/log/", LogUserActivity.as_view()),
-    path("sessions/end/", EndUserSession.as_view()),
+    path("userslist/", EligibleUsersListView.as_view(), name="eligible-users"),
+
+
 
 
 ]

@@ -2,10 +2,10 @@
 import React, {
   createContext, useContext, useEffect, useMemo, useRef, useState, useCallback,
 } from "react";
-import { getToken } from "./authStorage";
+import { getToken, getWsTokenOverride } from "./authStorage";
 import { useRealtimeSettings } from "./RealtimeSettingsContext";
 
-/* ───────────────────── small utils ───────────────────── */
+/* ───────── small utils ───────── */
 const get = (obj, path) => {
   const parts = path.split(".");
   let cur = obj;
@@ -15,7 +15,6 @@ const get = (obj, path) => {
   }
   return cur;
 };
-
 const first = (obj, paths, fallback) => {
   for (const p of paths) {
     const v = get(obj, p);
@@ -23,13 +22,11 @@ const first = (obj, paths, fallback) => {
   }
   return fallback;
 };
-
 const toPct = (raw) => {
   const n = Number(raw ?? 0);
   if (!Number.isFinite(n)) return 0;
   return n <= 1 ? n * 100 : n;
 };
-
 const extractScore = (m) => {
   const candidates = [
     get(m, "adjusted_probability"),
@@ -53,14 +50,9 @@ const extractScore = (m) => {
     get(m, "alert.score"),
     get(m, "result.score"),
     get(m, "details.score"),
-  ]
-    .map((v) => (v === undefined || v === null ? NaN : Number(v)))
-    .filter((n) => Number.isFinite(n));
-
-  if (candidates.length === 0) return 0;
-  return Math.max(...candidates);
+  ].map((v) => (v == null ? NaN : Number(v))).filter(Number.isFinite);
+  return candidates.length ? Math.max(...candidates) : 0;
 };
-
 const extractUser     = (m) => first(m, ["user","username","user_name","data.user","payload.user","actor"], "unknown");
 const extractUserId   = (m) => first(m, ["userId","user_id","data.userId","data.user_id","payload.userId","payload.user_id"], undefined);
 const extractMessage  = (m) => first(m, ["message","reason","text","event","data.message","payload.message"], "");
@@ -71,9 +63,8 @@ const extractSeverity = (m, pct, cut) => {
 const extractId = (m, pct) =>
   first(m, ["id","alert_id","uuid","data.id","payload.id"], null) ??
   `${extractUser(m)}|${extractMessage(m)}|${first(m, ["timestamp","time","ts","data.timestamp","payload.timestamp"], "")}|${pct}`;
-
 const normalizeTimestamp = (t) => {
-  if (t === undefined || t === null) return new Date().toISOString();
+  if (t == null) return new Date().toISOString();
   const num = Number(t);
   if (Number.isFinite(num)) {
     const ms = num < 1e12 ? num * 1000 : num;
@@ -83,18 +74,18 @@ const normalizeTimestamp = (t) => {
   return isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
 };
 
-/* ───────────────────────────── env (vite + cra) ───────────────────────────── */
+/* ───────── env (vite + cra) ───────── */
 const fromViteBase = (typeof import.meta !== "undefined" && import.meta.env?.VITE_WS_BASE) || undefined;
 const fromCraBase  = process.env.REACT_APP_WS_BASE || undefined;
 const fromVitePath = (typeof import.meta !== "undefined" && import.meta.env?.VITE_WS_PATH) || undefined;
 const fromCraPath  = process.env.REACT_APP_WS_PATH || undefined;
 
-const WS_BASE = fromViteBase || fromCraBase || "";           // empty => same host
+const WS_BASE = fromViteBase || fromCraBase || "";      // empty => same host
 const WS_PATH = fromVitePath || fromCraPath || "/ws/threats/";
 
-console.log("[WS env]", { fromViteBase, fromCraBase, fromVitePath, fromCraPath, WS_BASE, WS_PATH });
+console.log("[WS env]", { WS_BASE, WS_PATH });
 
-/* ───────────────────────────────── context / hook ───────────────────────────────── */
+/* ───────── context / hook ───────── */
 const AlertsContext = createContext(null);
 export function useAlerts() {
   const ctx = useContext(AlertsContext);
@@ -102,14 +93,47 @@ export function useAlerts() {
   return ctx;
 }
 
-/* ───────────────────────────────── component ───────────────────────────────── */
+/* Effective token getter (one place of truth) */
+function getEffectiveWsToken() {
+  return (
+    getWsTokenOverride?.() ||
+    localStorage.getItem("ws_token_override") ||   // manual override for dev
+    getToken?.() ||
+    localStorage.getItem("custom_token") ||
+    localStorage.getItem("token") ||
+    ""
+  ).trim();
+}
+
+/* Build ws://… URL from token */
+function buildWsUrl(tokenRaw) {
+  const token = String(tokenRaw || "").trim();
+  const { protocol, host } = window.location;
+  const wsProto = protocol === "https:" ? "wss" : "ws";
+
+  let baseHost = WS_BASE || host;
+  if (baseHost.includes("://")) {
+    baseHost = baseHost
+      .replace(/^http:\/\//i, `${wsProto}://`)
+      .replace(/^https:\/\//i, `${wsProto}://`)
+      .replace(/^ws:\/\//i, `${wsProto}://`)
+      .replace(/^wss:\/\//i, `${wsProto}://`);
+  } else {
+    baseHost = `${wsProto}://${baseHost}`;
+  }
+
+  const path = WS_PATH.startsWith("/") ? WS_PATH : `/${WS_PATH}`;
+  return `${baseHost}${path}?token=${encodeURIComponent(token)}`;
+}
+
+/* ───────── component ───────── */
 export default function GlobalAlertsProvider({ children }) {
   const [alerts, setAlerts] = useState([]);
   const [emergency, setEmergency] = useState(false);
   const [soundMuted, setSoundMuted] = useState(() => localStorage.getItem("im_sound_muted") === "1");
   const { settings: rs } = useRealtimeSettings() || {};
 
-  /* ========== Audio ========== */
+  /* ===== Audio (unchanged except tiny guards) ===== */
   const normalAudioRef = useRef(null);
   const highAudioRef   = useRef(null);
   const timersRef = useRef({ nRepeat:null, nStop:null, hRepeat:null, hStop:null });
@@ -125,16 +149,11 @@ export default function GlobalAlertsProvider({ children }) {
     const tryPlayPauseSilent = async (el) => {
       if (!el) return false;
       try {
-        const prevMuted = el.muted;
-        const prevVol = el.volume;
-        el.muted = true;
-        el.volume = 0;
+        const prevMuted = el.muted, prevVol = el.volume;
+        el.muted = true; el.volume = 0;
         if (!el.src) el.src = DEFAULT_NORMAL_URL;
-        await el.play();
-        el.pause();
-        el.currentTime = 0;
-        el.muted = prevMuted;
-        el.volume = prevVol;
+        await el.play(); el.pause(); el.currentTime = 0;
+        el.muted = prevMuted; el.volume = prevVol;
         return true;
       } catch { return false; }
     };
@@ -142,13 +161,11 @@ export default function GlobalAlertsProvider({ children }) {
     let unlocked = false;
     const finish = () => {
       if (unlocked) return;
-      unlocked = true;
-      setSoundReady(true);
+      unlocked = true; setSoundReady(true);
       for (const ev of ["pointerdown","mousedown","click","keydown","touchstart"]) {
         window.removeEventListener(ev, onGesture, true);
       }
     };
-
     const onGesture = async () => {
       await Promise.allSettled([
         tryPlayPauseSilent(normalAudioRef.current),
@@ -180,16 +197,11 @@ export default function GlobalAlertsProvider({ children }) {
     const tryPlayPauseSilent = async (el) => {
       if (!el) return false;
       try {
-        const prevMuted = el.muted;
-        const prevVol = el.volume;
-        el.muted = true;
-        el.volume = 0;
+        const prevMuted = el.muted, prevVol = el.volume;
+        el.muted = true; el.volume = 0;
         if (!el.src) el.src = DEFAULT_NORMAL_URL;
-        await el.play();
-        el.pause();
-        el.currentTime = 0;
-        el.muted = prevMuted;
-        el.volume = prevVol;
+        await el.play(); el.pause(); el.currentTime = 0;
+        el.muted = prevMuted; el.volume = prevVol;
         return true;
       } catch { return false; }
     };
@@ -214,7 +226,12 @@ export default function GlobalAlertsProvider({ children }) {
     if (t.hStop)   clearTimeout(t.hStop);
     timersRef.current = { nRepeat:null, nStop:null, hRepeat:null, hStop:null };
   };
-  const playOnce = (el) => { try { el.currentTime = 0; void el.play(); } catch {} };
+   // const playOnce = (el) => { try { el.currentTime = 0; void el.play(); } catch {} };
+const playOnce = (el) => {
+  try { el.currentTime = 0; const p = el.play(); if (p && p.catch) p.catch(e => console.warn('[audio] play failed:', e)); }
+  catch (e) { console.warn('[audio] exception:', e); }
+};
+
 
   const playNormal = useCallback(async () => {
     if (soundMuted || rs?.sound?.enabled === false) return;
@@ -248,7 +265,7 @@ export default function GlobalAlertsProvider({ children }) {
     if (cap > 0) timersRef.current.hStop = setTimeout(() => { try { el.pause(); } catch {} }, cap);
   }, [rs?.sound?.high, rs?.sound?.enabled, soundMuted, soundReady, ensureUnlocked]);
 
-  /* ========== Flash class toggle ========== */
+  /* ===== Flash class ===== */
   useEffect(() => {
     const on = emergency && (rs?.flash?.enabled ?? true);
     const root = document.getElementById("root");
@@ -260,7 +277,7 @@ export default function GlobalAlertsProvider({ children }) {
     };
   }, [emergency, rs?.flash?.enabled]);
 
-  /* ========== dismiss / dedupe ========== */
+  /* ===== dismiss / dedupe ===== */
   const seenRef = useRef(new Set());
   const dismissedRef = useRef(new Set());
   const remember = (id) => {
@@ -275,7 +292,7 @@ export default function GlobalAlertsProvider({ children }) {
     setAlerts((prev) => prev.filter((a) => a.id !== id));
   }, []);
 
-  /* ========== WebSocket ========== */
+  /* ===== WebSocket ===== */
   const wsRef = useRef(null);
   const hbRef = useRef(null);
   const retryRef = useRef(0);
@@ -290,27 +307,6 @@ export default function GlobalAlertsProvider({ children }) {
   };
   const stopHeartbeat = () => { if (hbRef.current) clearInterval(hbRef.current); hbRef.current = null; };
 
-  const buildWsUrl = (tokenRaw) => {
-    const token = String(tokenRaw || "").trim(); // ⬅️ IMPORTANT: trim stray spaces
-    const { protocol, host } = window.location;
-    const wsProto = protocol === "https:" ? "wss" : "ws";
-
-    let baseHost = WS_BASE || host;
-    if (baseHost.includes("://")) {
-      baseHost = baseHost
-        .replace(/^http:\/\//i, `${wsProto}://`)
-        .replace(/^https:\/\//i, `${wsProto}://`)
-        .replace(/^ws:\/\//i, `${wsProto}://`)
-        .replace(/^wss:\/\//i, `${wsProto}://`);
-    } else {
-      baseHost = `${wsProto}://${baseHost}`;
-    }
-
-    const path = WS_PATH.startsWith("/") ? WS_PATH : `/${WS_PATH}`;
-    return `${baseHost}${path}?token=${encodeURIComponent(token)}`;
-  };
-
-  // local test helper (never used automatically)
   const pushAlert = useCallback((overrides = {}) => {
     const now = new Date().toISOString();
     const item = {
@@ -322,9 +318,25 @@ export default function GlobalAlertsProvider({ children }) {
       scorePct: overrides.scorePct ?? 90,
       severity: overrides.severity ?? "high",
       timestamp: now,
-      __system: !!overrides.__system, // internal flag
+      __system: !!overrides.__system,
     };
     setAlerts((prev) => [item, ...prev].slice(0, 50));
+
+    // fan-out to dashboard listeners
+    try {
+      window.dispatchEvent(new CustomEvent("im-new-alert", {
+        detail: {
+          username: item.user,
+          timestamp: item.timestamp,
+          score: item.scorePct,
+          score_pct: item.scorePct,
+          adjusted_probability: Number(item.scorePct) / 100,
+          reason: item.message || "",
+        },
+      }));
+    } catch (err) {
+      console.warn("[alerts] fanout failed (inject):", err);
+    }
   }, []);
 
   const handleMessage = useCallback((e) => {
@@ -332,7 +344,6 @@ export default function GlobalAlertsProvider({ children }) {
     window.__lastMsg = msg;
     console.log("[WS raw]", msg);
 
-    // Ignore explicit system/silent messages if backend ever sends them
     const isSystem = !!(msg.system || msg.silent || msg.__system);
     if (isSystem) return;
 
@@ -363,13 +374,27 @@ export default function GlobalAlertsProvider({ children }) {
     remember(id);
     setAlerts((prev) => [item, ...prev].slice(0, 50));
 
-    // Don’t make noise for system-ish users/messages (extra guard)
+    // ➜ fan-out to the dashboard charts
+    try {
+      window.dispatchEvent(new CustomEvent("im-new-alert", {
+        detail: {
+          username: item.user,
+          timestamp: item.timestamp,
+          score: item.scorePct,
+          score_pct: item.scorePct,
+          adjusted_probability: Number(item.scorePct) / 100,
+          reason: item.message || "",
+        },
+      }));
+    } catch (err) {
+      console.warn("[alerts] fanout failed:", err);
+    }
+
     const looksSystem = (String(item.user).toLowerCase() === "system") ||
                         /connected/i.test(item.message || "");
     if (rs?.sound?.enabled !== false && !looksSystem) {
       (severity === "high" ? playHigh : playNormal)();
     }
-
     const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (!reduce && severity === "high" && (rs?.flash?.enabled ?? true) && !looksSystem) {
       setEmergency(true);
@@ -381,23 +406,19 @@ export default function GlobalAlertsProvider({ children }) {
 
   const openSocket = useCallback((tokenRaw) => {
     const token = (tokenRaw || "").trim();
-    if (!token) return;
+    if (!token) {
+      console.warn("[WS] no token available; skipping connect");
+      return;
+    }
     if (wsRef.current && [WebSocket.OPEN, WebSocket.CONNECTING].includes(wsRef.current.readyState)) return;
 
     const url = buildWsUrl(token);
     console.log("[WS] connecting:", url);
+    console.log("[WS] token segments:", token.split(".").length);
     const ws = new WebSocket(url);
     wsRef.current = ws;
 
-    ws.onopen = () => {
-      console.log("[WS] open");
-      retryRef.current = 0;
-      startHeartbeat(ws);
-
-      // 🔇 NO fake banner, NO sound on connect
-      // If you want a banner without sound, you could do:
-      // pushAlert({ user: "system", message: "WebSocket CONNECTED", severity: "normal", score: 0.5, scorePct: 50, __system: true });
-    };
+    ws.onopen = () => { console.log("[WS] open"); retryRef.current = 0; startHeartbeat(ws); };
     ws.onmessage = handleMessage;
     ws.onerror = (err) => { console.warn("[WS] error", err); try { ws.close(); } catch {} };
     ws.onclose = (ev) => {
@@ -408,66 +429,97 @@ export default function GlobalAlertsProvider({ children }) {
       retryRef.current = r;
       const delay = 500 * Math.pow(2, r - 1);
       if (reconnectRef.current) clearTimeout(reconnectRef.current);
-      reconnectRef.current = setTimeout(() => openSocket(getToken()), delay);
+      reconnectRef.current = setTimeout(() => openSocket(getEffectiveWsToken()), delay);
     };
   }, [handleMessage]);
 
+  /* Mount: watch token & connect */
   useEffect(() => {
     let cancelled = false;
+
     const tick = () => {
       if (cancelled) return;
-      const token = (getToken() || "").trim();
-      if (token && token !== lastTokenRef.current) {
+      const token = getEffectiveWsToken();
+      if (!token) {
+        console.warn("[WS] tick: no token; segments=0");
+        return;
+      }
+      if (token !== lastTokenRef.current) {
         lastTokenRef.current = token;
         openSocket(token);
       }
     };
+
+    // first attempt
     tick();
+
+    // re-check every few seconds in case login/store changes
     const id = setInterval(tick, 3000);
+
+    // storage changes (e.g., dev overrides or auth refresh)
     const onStorage = () => {
-      const token = (getToken() || "").trim();
+      const token = getEffectiveWsToken();
       if (token && token !== lastTokenRef.current) {
         lastTokenRef.current = token;
         openSocket(token);
       }
     };
     window.addEventListener("storage", onStorage);
+
     return () => {
       cancelled = true;
       clearInterval(id);
       window.removeEventListener("storage", onStorage);
       clearTimers();
       if (reconnectRef.current) clearTimeout(reconnectRef.current);
-      try { wsRef.current?.close(); } catch {}
+      // try { wsRef.current?.close(); } catch {}
       wsRef.current = null;
       stopHeartbeat();
     };
   }, [openSocket]);
 
-  // Manual UI smoke test (never automatic)
+  /* ===== Dev helpers on window ===== */
   useEffect(() => {
-    window.__injectTest = async (severity = "high") => {
+    window.setWsDevToken = (token, opts = {}) => {
+      localStorage.setItem("ws_token_override", token || "");
+      console.log("[WS] override set. segments=", token ? token.split(".").length : 0);
+      if (opts.reload) window.location.reload();
+    };
+    window.clearWsDevToken = (reload = false) => {
+      localStorage.removeItem("ws_token_override");
+      console.log("[WS] override cleared");
+      if (reload) window.location.reload();
+    };
+    window.debugWs = () => {
+      const t = getEffectiveWsToken();
+      const url = buildWsUrl(t);
+      console.log("[WS debug] token len:", t?.length || 0, "segments:", t ? t.split(".").length : 0);
+      console.log("[WS debug] url:", url);
+      try {
+        const ws = new WebSocket(url);
+        ws.onopen = () => console.log("[WS debug] open");
+        ws.onmessage = (e) => console.log("[WS debug] msg", e.data);
+        ws.onerror = (e) => console.log("[WS debug] error", e);
+        ws.onclose = (e) => console.log("[WS debug] close", e.code, e.reason);
+      } catch (e) { console.error(e); }
+    };
+  }, []);
+
+  // Manual UI smoke test (inject into banner + fan-out)
+  useEffect(() => {
+    window.injectTest = async (severity = "high") => {
       await ensureUnlocked();
+      const pct = severity === "high" ? 90 : 60;
       pushAlert({
         severity,
         message: severity === "high" ? "Simulated HIGH threat" : "Simulated normal event",
         score: severity === "high" ? 0.9 : 0.6,
-        scorePct: severity === "high" ? 90 : 60,
+        scorePct: pct,
       });
-      if (rs?.sound?.enabled !== false) {
-        (severity === "high" ? playHigh : playNormal)();
-      }
-      if (severity === "high" && (rs?.flash?.enabled ?? true)) {
-        setEmergency(true);
-        const total = Number(rs?.flash?.totalMs ?? 12000);
-        const t = setTimeout(() => setEmergency(false), total);
-        return () => clearTimeout(t);
-      }
-      return undefined;
     };
-    const onKey = (e) => { if (e.altKey && e.key.toLowerCase() === "a") window.__injectTest("high"); };
+    const onKey = (e) => { if (e.altKey && e.key.toLowerCase() === "a") window.injectTest("high"); };
     window.addEventListener("keydown", onKey);
-    return () => { window.removeEventListener("keydown", onKey); delete window.__injectTest; };
+    return () => { window.removeEventListener("keydown", onKey); delete window.injectTest; };
   }, [pushAlert, rs?.sound?.enabled, rs?.flash?.enabled, rs?.flash?.totalMs, playHigh, playNormal, ensureUnlocked]);
 
   useEffect(() => {
@@ -489,4 +541,3 @@ export default function GlobalAlertsProvider({ children }) {
 
   return <AlertsContext.Provider value={value}>{children}</AlertsContext.Provider>;
 }
-

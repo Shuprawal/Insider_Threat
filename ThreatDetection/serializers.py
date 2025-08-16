@@ -13,7 +13,11 @@ from .models import ActivityLogs, CustomUser, Alerts
 class CustomUserSerializer(serializers.ModelSerializer):
     class Meta:
         model = CustomUser
-        fields = ['id', 'username']
+        fields = [
+            'id', 'username', 'email', 'first_name', 'last_name',
+            'department', 'role', 'is_superuser',  'is_active',
+            'is_suspended', 'profile_picture'
+        ]
 
 class ActivityLogSerializer(serializers.ModelSerializer):
     user = CustomUserSerializer(read_only=True)

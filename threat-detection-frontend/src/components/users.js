@@ -81,7 +81,9 @@ export default function UsersPage() {
             User <span className="imusers-title-accent-sentinelX">Directory</span>
           </h2>
 
-          <button
+            <div>
+
+                <button
             className={
               "imusers-chipbutton-sentinelX" +
               (showSuspended ? " imusers-chipbutton--active-sentinelX" : "")
@@ -93,6 +95,21 @@ export default function UsersPage() {
           >
             {showSuspended ? "Show Active" : "Suspended"}
           </button>
+
+                 <button
+            className={
+              "imusers-chipbutton-sentinelX"
+
+            }
+            onClick={() => navigate(`/register`)}
+          >
+             Add
+          </button>
+
+            </div>
+
+
+
         </div>
 
         {/* filter row (search + sort) */}

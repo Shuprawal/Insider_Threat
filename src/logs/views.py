@@ -342,12 +342,10 @@ from ThreatDetection.models import CustomUser
 from .utils import analyze_and_persist_event
 
 class AnalyzeUserActivity(APIView):
-    permission_classes = [IsAuthenticated]
 
     def post(self, request):
         data = request.data
 
-        # --- resolve selected user ---
         uid = data.get('user') or data.get('target_user_id')
         if uid is None:
             return Response({"error": "user is required"}, status=400)
@@ -373,22 +371,7 @@ class AnalyzeUserActivity(APIView):
         usb_count  = int(data.get('usb_count')  or 0)
         count = num_emails if act == 'email_sent' else num_files if act == 'file_accessed' else usb_count
 
-        # --- optional: reset today's agg when starting a session from the wizard ---
-        # if data.get('fresh_session'):
-        #     from django.db import transaction
-        #     from django.utils.dateparse import parse_datetime
-        #     from django.utils import timezone
-        #     dt = parse_datetime(ts) or timezone.make_aware(datetime.strptime(ts, "%Y-%m-%dT%H:%M"))
-        #     local_day = dt.astimezone(timezone.get_current_timezone()).date()
-        #     with transaction.atomic():
-        #         agg, _ = UserDailyAgg.objects.select_for_update().get_or_create(user=target_user, day=local_day)
-        #         agg.number_of_emails_dispatched = 0
-        #         agg.number_of_files_interacted = 0
-        #         agg.total_logon_attempts = 0
-        #         agg.usb_connection_incidents = 0
-        #         agg.nighttime_email_events = 0
-        #         agg.number_of_night_logons = 0
-        #         agg.save()
+
 
         # --- go through your shared helper (writes ActivityLogs for every event, Alerts when needed) ---
         out = analyze_and_persist_event(
@@ -405,49 +388,27 @@ class AnalyzeUserActivity(APIView):
 
 
 
+class EligibleUsersListView(APIView):
 
+    def get(self, request):
 
-class StartUserSession(APIView):
-    permission_classes = [IsAuthenticated]
-    def post(self, request):
-        # optional start_time from client: "YYYY-MM-DDTHH:MM"
-        start_time = request.data.get("start_time") or now().strftime("%Y-%m-%dT%H:%M")
-        start_session(request.user, when=start_time)
-        return Response({"message": "Session started for user.", "started_at": start_time})
+        qs = (
+            CustomUser.objects
+            .filter(is_active=True, is_suspended=False,  is_superuser=False)
+            .only("id", "username", "email", "department", "role", "is_active", "is_suspended")
+            .order_by("username")
+        )
 
-class LogUserActivity(APIView):
-    permission_classes = [IsAuthenticated]
-    def post(self, request):
-        activity_type = request.data.get("activity_type")
-        extra_info = request.data.get("extra_info", {}) or {}
-        extra_info.setdefault("timestamp", request.data.get("timestamp") or now().strftime("%Y-%m-%dT%H:%M"))
-
-        agg = log_activity(request.user, activity_type, extra_info)
-        return Response({
-            "message": "Activity logged.",
-            "current_data": {
-                "emails": agg.number_of_emails_dispatched,
-                "files": agg.number_of_files_interacted,
-                "usb": agg.usb_connection_incidents,
-                "logons": agg.total_logon_attempts,
-                "night_emails": agg.nighttime_email_events,
-                "night_logons": agg.number_of_night_logons,
-            },
-            "day": str(agg.day)
-        })
-
-class EndUserSession(APIView):
-    permission_classes = [IsAuthenticated]
-    def post(self, request):
-        end_time = request.data.get("end_time") or now().strftime("%Y-%m-%dT%H:%M")
-        result = end_session_and_analyze(request.user, when=end_time)
-        return Response({
-            "message": "Session ended and analyzed.",
-            "ended_at": end_time,
-            "analysis": {
-                "is_anomaly": result["is_anomaly"],
-                "probability": round(result["probability"], 6),
-                "threshold": round(result["threshold"], 6),
-                "iforest_score": round(result["iforest_score"], 6),
+        data = [
+            {
+                "id": u.id,
+                "username": u.username,
+                "email": u.email or "",
+                "department": u.department or "",
+                "role": u.role or "",
+                "is_active": bool(u.is_active),
+                "is_suspended": bool(u.is_suspended),
             }
-        })
+            for u in qs
+        ]
+        return Response(data)

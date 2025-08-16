@@ -1,20 +1,17 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
-
 import { useNavigate } from 'react-router-dom';
-// import InsiderRiskAnimatedProbabilityDonutGauge from '../components/InsiderRiskAnimatedProbabilityDonutGauge';
 import ThreatMeter from "./ThreatMeter";
 import '../App.css';
-import {getToken} from "./authStorage";
+import { getToken } from "./authStorage";
 
 const BACKEND_ENDPOINTS_FOR_ACTIVITY_PIPELINE = Object.freeze({
-  usersListingEndpoint: 'http://localhost:8000/api/users/',
+  usersListingEndpoint: 'http://localhost:8000/api/userslist/',
   unifiedAnalyzerEndpoint: 'http://localhost:8000/api/activities/analyze/',
 });
 
 const ORGANIZATIONAL_NIGHT_SHIFT_ROLE_LABEL = 'NightOps';
 
-// helpers
 const pad = (n) => String(n).padStart(2, '0');
 const toLocalInputString = (dt) =>
   `${dt.getFullYear()}-${pad(dt.getMonth()+1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
@@ -22,9 +19,9 @@ const nowLocalInputString = () => toLocalInputString(new Date());
 
 function SmallStatusPillVisual({ children, tone='default' }) {
   return (
-    <span className={`im-pill ${
-      tone==='good'?'im-pill--good':tone==='info'?'im-pill--info':tone==='danger'?'im-pill--danger':''
-    }`}>{children}</span>
+    <span className={`im-pill ${tone==='good'?'im-pill--good':tone==='info'?'im-pill--info':tone==='danger'?'im-pill--danger':''}`}>
+      {children}
+    </span>
   );
 }
 
@@ -37,11 +34,42 @@ function MicroMetricCard({ label, value }) {
   );
 }
 
-export default function InteractiveUserSessionOrchestrationPanel({ setAuth }) {
+// Permissive client-side filter (only exclude if flag explicitly disqualifies)
+function filterEligibleUsers(users) {
+  return (users || []).filter(u =>
+    (u?.is_active !== false) &&
+    (u?.is_suspended !== true) &&
+    (u?.is_superuser !== true) &&
+    (u?.is_staff !== true)
+  );
+}
+
+export default function InteractiveUserSessionOrchestrationPanel({ setAuth, initialUsers }) {
   const navigate = useNavigate();
 
-  // ---------- very explicit state names ----------
-  const [listOfSelectableSystemUsers, setListOfSelectableSystemUsers] = useState([]);
+  // ----- users from same page, or fallback to API -----
+  const [listOfSelectableSystemUsers, setListOfSelectableSystemUsers] = useState(
+    filterEligibleUsers(initialUsers || [])
+  );
+
+  useEffect(() => {
+    if (Array.isArray(initialUsers) && initialUsers.length > 0) return; // already provided
+    (async () => {
+      try {
+        const token = getToken();
+        const res = await axios.get(
+          BACKEND_ENDPOINTS_FOR_ACTIVITY_PIPELINE.usersListingEndpoint,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        setListOfSelectableSystemUsers(filterEligibleUsers(res.data || []));
+      } catch (e) {
+        console.error(e);
+        setFrontendErrorBannerMessage('Failed to load users.');
+      }
+    })();
+  }, [initialUsers]);
+
+  // ----- rest of state -----
   const [selectedTargetUserIdString, setSelectedTargetUserIdString] = useState('');
   const [selectedTargetUserRecord, setSelectedTargetUserRecord] = useState(null);
 
@@ -69,25 +97,7 @@ export default function InteractiveUserSessionOrchestrationPanel({ setAuth }) {
   const [frontendSuccessBannerMessage, setFrontendSuccessBannerMessage] = useState('');
   const [busyStateForNetwork, setBusyStateForNetwork] = useState(false);
 
-  // ---------- bootstrap users ----------
-  useEffect(() => {
-    (async () => {
-      try {
-        // const token = localStorage.getItem('custom_token');
-          const token = getToken()
-        const res = await axios.get(
-          BACKEND_ENDPOINTS_FOR_ACTIVITY_PIPELINE.usersListingEndpoint,
-          { headers: { Authorization: `Bearer ${token}` } }
-        );
-        setListOfSelectableSystemUsers(res.data || []);
-      } catch (e) {
-        console.error(e);
-        setFrontendErrorBannerMessage('Failed to load users.');
-      }
-    })();
-  }, []);
-
-  // ---------- when user changes, hard-reset per-user view ----------
+  // when user changes, reset per-user view
   useEffect(() => {
     const found = listOfSelectableSystemUsers.find(u => String(u.id) === String(selectedTargetUserIdString)) || null;
     setSelectedTargetUserRecord(found);
@@ -101,8 +111,7 @@ export default function InteractiveUserSessionOrchestrationPanel({ setAuth }) {
   }, [selectedTargetUserIdString, listOfSelectableSystemUsers]);
 
   const tokenHeaderMemo = useMemo(() => {
-    // const token = localStorage.getItem('custom_token');
-      const token = getToken()
+    const token = getToken();
     return { Authorization: `Bearer ${token}` };
   }, []);
 
@@ -132,7 +141,7 @@ export default function InteractiveUserSessionOrchestrationPanel({ setAuth }) {
     const payload = {
       user: userIdNumber,
       activity: activityName,
-      activity_type: activityName, // legacy validators happy
+      activity_type: activityName, // AnalyzeUserActivity accepts either key
       timestamp: localTimestampString,
       num_emails: numEmails,
       num_files:  numFiles,
@@ -140,6 +149,7 @@ export default function InteractiveUserSessionOrchestrationPanel({ setAuth }) {
       details,
       extra_info: { timestamp: localTimestampString, count: legacyCount }
     };
+
     return axios.post(
       BACKEND_ENDPOINTS_FOR_ACTIVITY_PIPELINE.unifiedAnalyzerEndpoint,
       payload,
@@ -147,12 +157,11 @@ export default function InteractiveUserSessionOrchestrationPanel({ setAuth }) {
     );
   };
 
-  // ---------- Step 1: logon ----------
+  // Step 1: logon
   const handleRecordLogonForSelectedUser = async () => {
     clearBanners();
     if (!selectedTargetUserIdString) return setFrontendErrorBannerMessage('Please choose a user.');
     if (!unifiedActionTimestampLocal) return setFrontendErrorBannerMessage('Pick date & time.');
-
     try {
       setBusyStateForNetwork(true);
       const res = await postAnalyzeActivityEventToBackend({
@@ -161,17 +170,14 @@ export default function InteractiveUserSessionOrchestrationPanel({ setAuth }) {
         localTimestampString: unifiedActionTimestampLocal,
         details: 'Session start via orchestration panel'
       });
-
       copyAggregatesFromBackendResponse(res);
       setLatestModelAnalysisObject(res?.data?.analysis || null);
       setLatestSubmittedEventDescriptor({ activity: 'logon', timestamp: unifiedActionTimestampLocal, count: 0 });
       setLatestRaisedAlertDescriptor(res?.data?.alert || null);
-
       setFrontendSuccessBannerMessage('🎮 Logon recorded. You can now log activities.');
       setSessionIsCurrentlyActiveFlag(true);
       setWizardProgressStepIndex(2);
       setUserHasLoggedAnyActionDuringThisSessionFlag(true);
-
       const d = new Date(unifiedActionTimestampLocal); d.setMinutes(d.getMinutes() + 5);
       setUnifiedActionTimestampLocal(toLocalInputString(d));
     } catch (e2) {
@@ -182,19 +188,17 @@ export default function InteractiveUserSessionOrchestrationPanel({ setAuth }) {
     }
   };
 
-  // ---------- Step 2: activities ----------
+  // Step 2: activities
   const handleRecordArbitraryActivityForSelectedUser = async (e) => {
     e.preventDefault();
     clearBanners();
     if (!activityEventCategory) return setFrontendErrorBannerMessage('Choose an activity.');
     if (!unifiedActionTimestampLocal) return setFrontendErrorBannerMessage('Pick date & time.');
-
     let n = 0;
     if (['email_sent','file_accessed','usb_inserted'].includes(activityEventCategory)) {
       n = Number(numericCountForActivity);
       if (!Number.isFinite(n) || n < 0) return setFrontendErrorBannerMessage('Enter a non-negative count.');
     }
-
     try {
       setSubmitBusyForActivity(true);
       const res = await postAnalyzeActivityEventToBackend({
@@ -206,20 +210,17 @@ export default function InteractiveUserSessionOrchestrationPanel({ setAuth }) {
         numFiles:  activityEventCategory === 'file_accessed' ? n : 0,
         numUsb:    activityEventCategory === 'usb_inserted' ? n : 0,
       });
-
       copyAggregatesFromBackendResponse(res);
       const analysisPayload = res?.data?.analysis;
       setLatestModelAnalysisObject(analysisPayload || null);
       setLatestSubmittedEventDescriptor({ activity: activityEventCategory, timestamp: unifiedActionTimestampLocal, count: n });
       setLatestRaisedAlertDescriptor(res?.data?.alert || null);
-
       setUserHasLoggedAnyActionDuringThisSessionFlag(true);
       setFrontendSuccessBannerMessage(
         analysisPayload?.is_anomaly
           ? `⚠️ Alert score ${Number(analysisPayload.probability).toFixed(3)}`
           : 'Activity logged.'
       );
-
       const d = new Date(unifiedActionTimestampLocal); d.setMinutes(d.getMinutes() + 5);
       setUnifiedActionTimestampLocal(toLocalInputString(d));
       setNumericCountForActivity('');
@@ -231,7 +232,7 @@ export default function InteractiveUserSessionOrchestrationPanel({ setAuth }) {
     }
   };
 
-  // ---------- Step 3: logoff ----------
+  // Step 3: logoff
   const handleRecordLogoffForSelectedUser = async () => {
     clearBanners();
     if (!unifiedActionTimestampLocal) return setFrontendErrorBannerMessage('Pick date & time.');
@@ -243,12 +244,10 @@ export default function InteractiveUserSessionOrchestrationPanel({ setAuth }) {
         localTimestampString: unifiedActionTimestampLocal,
         details: 'Session end via orchestration panel'
       });
-
       copyAggregatesFromBackendResponse(res);
       setLatestModelAnalysisObject(res?.data?.analysis || null);
       setLatestSubmittedEventDescriptor({ activity: 'logoff', timestamp: unifiedActionTimestampLocal, count: 0 });
       setLatestRaisedAlertDescriptor(res?.data?.alert || null);
-
       setFrontendSuccessBannerMessage('🔒 Logoff recorded & analyzed.');
       setWizardProgressStepIndex(3);
       setSessionIsCurrentlyActiveFlag(false);
@@ -279,8 +278,6 @@ export default function InteractiveUserSessionOrchestrationPanel({ setAuth }) {
 
   return (
     <div className="imdash-page">
-
-
       {frontendErrorBannerMessage && <div className="im-banner im-banner--error">{frontendErrorBannerMessage}</div>}
       {!!frontendSuccessBannerMessage && !frontendErrorBannerMessage && (
         <div className="im-banner im-banner--ok">{frontendSuccessBannerMessage}</div>
@@ -295,7 +292,7 @@ export default function InteractiveUserSessionOrchestrationPanel({ setAuth }) {
             </SmallStatusPillVisual>
             <SmallStatusPillVisual tone={wizardProgressStepIndex >= 1 ? 'info' : undefined}>1. Logon</SmallStatusPillVisual>
             <SmallStatusPillVisual tone={wizardProgressStepIndex >= 2 ? 'info' : undefined}>2. Activities</SmallStatusPillVisual>
-            <SmallStatusPillVisual tone={wizardProgressStepIndex >= 3 ? 'info' : undefined}>3. Logoff</SmallStatusPillVisual>
+            <SmallStatusPillVisual tone={wizardProgressStepIndex >= 3 ? 'info' : 'default'}>3. Logoff</SmallStatusPillVisual>
           </div>
         </div>
 

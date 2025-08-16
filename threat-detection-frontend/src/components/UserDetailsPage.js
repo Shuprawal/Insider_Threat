@@ -13,8 +13,9 @@ import { getToken } from "./authStorage";
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import html2canvas from 'html2canvas';
+
 import {
-  Document, Packer, Paragraph, TextRun, HeadingLevel, ImageRun,
+  Document, Packer, Paragraph, HeadingLevel, ImageRun,
   Table, TableRow, TableCell, WidthType, AlignmentType
 } from 'docx';
 
@@ -24,6 +25,10 @@ function UserDetailsPage() {
 
   const [user, setUser] = useState(null);
   const [error, setError] = useState("");
+
+  // Viewer (current logged-in user) + permission flag
+  const [viewer, setViewer] = useState(null);
+  const [canManage, setCanManage] = useState(false);
 
   const [alertPoints, setAlertPoints] = useState([]);
   const [pieLabels, setPieLabels] = useState([]);
@@ -48,13 +53,13 @@ function UserDetailsPage() {
   // ---- Company header config ----
   const COMPANY = {
     name: 'Insider Monitor',
-    // Use a local asset or a CORS-enabled URL:
-    logoUrl: '/logo.png', // e.g., 'http://localhost:8000/static/logo.png'
+    logoUrl: '/logo.png',
   };
 
   const token = getToken();
   const cfg = { headers: { Authorization: `Bearer ${token}` } };
 
+  // -------------- Helpers --------------
   const resolveAvatar = (pic) => {
     if (!pic) return null;
     if (/^https?:\/\//i.test(pic)) return pic;
@@ -112,6 +117,40 @@ function UserDetailsPage() {
       source: 'current-month'
     };
   };
+
+  // -------- Fetch current viewer + compute permissions --------
+  async function fetchViewer() {
+    try {
+      // Your urls.py shows: path('auth/me/', me_view, ...)
+      const tryEndpoints = [
+        'http://localhost:8000/auth/me/',
+        // Optional fallback if you later mount it under /api/
+        'http://localhost:8000/api/auth/me/',
+      ];
+      let me = null;
+      for (const url of tryEndpoints) {
+        try {
+          const r = await axios.get(url, cfg);
+          if (r?.data) { me = r.data; break; }
+        } catch { /* try next */ }
+      }
+      if (!me) {
+        setViewer(null);
+        setCanManage(false);
+        return;
+      }
+      const data = me?.user ? me.user : me;
+      setViewer(data);
+
+      const role = String(data?.role || '').toLowerCase();
+      // CustomUser doesn't have is_staff; it DOES have is_superuser via PermissionsMixin
+      const manage = !!(data?.is_superuser || role === 'admin' || role === 'superuser');
+      setCanManage(manage);
+    } catch {
+      setViewer(null);
+      setCanManage(false);
+    }
+  }
 
   async function fetchUser() {
     setError("");
@@ -201,12 +240,23 @@ function UserDetailsPage() {
     }
   }
 
+  // Fetch viewer once (IMPORTANT: don't comment this out)
+  useEffect(() => {
+    fetchViewer();
+  }, []);
+
+  // Fetch the profile data whenever inputs change
   useEffect(() => {
     fetchUser();
   }, [userId, username, startDate, endDate, activitiesLimit]);
 
+  // -------- Guarded actions (respect canManage) --------
   const handleDelete = async () => {
     if (!user) return;
+    if (!canManage) {
+      alert("You don't have permission to delete users.");
+      return;
+    }
     const confirmDelete = window.confirm(`Are you sure you want to delete user: ${user.username}?`);
     if (!confirmDelete) return;
 
@@ -220,6 +270,11 @@ function UserDetailsPage() {
   };
 
   const handleSuspendChange = async (e) => {
+    if (!canManage) {
+      e.target.value = user?.is_suspended ? 'Yes' : 'No';
+      alert("You don't have permission to change suspension status.");
+      return;
+    }
     const newValue = e.target.value === 'Yes';
     try {
       await axios.put(`http://localhost:8000/api/users/${user.id || userId}/suspend/`, {
@@ -269,16 +324,13 @@ function UserDetailsPage() {
 
     const { start, end, label } = getEffectiveRange();
 
-    // Filter activities to effective range (if API didn't already)
     const filteredActivities = (activities || []).filter(a => {
       const t = new Date(a.timestamp);
       return !Number.isNaN(t.getTime()) && t >= start && t <= end;
     });
 
-    // derive topic types
     const topicTypes = Array.from(new Set(filteredActivities.map(a => a.activity_type || '—'))).filter(Boolean);
 
-    // cover: company logo (optional)
     const logoDataUrl = await fetchImageAsDataURL(COMPANY.logoUrl);
 
     const pdf = new jsPDF({ unit: 'mm', format: 'a4' });
@@ -381,10 +433,8 @@ function UserDetailsPage() {
       didDrawPage: () => {
         pdf.setFontSize(9);
         pdf.setTextColor(100);
-        // running header
         const header = `${COMPANY.name} • User Report • ${label}`;
         pdf.text(header, marginL, 10);
-        // running footer
         const str = `Page ${pdf.internal.getNumberOfPages()}`;
         pdf.text(str, 210 - marginL, 290, { align: 'right' });
       }
@@ -426,9 +476,7 @@ function UserDetailsPage() {
       const t = new Date(a.timestamp);
       return !Number.isNaN(t.getTime()) && t >= start && t <= end;
     });
-    const topicTypes = Array.from(new Set(filteredActivities.map(a => a.activity_type || '—'))).filter(Boolean);
 
-    // Company logo
     const logoBuf = await fetchImageAsArrayBuffer(COMPANY.logoUrl);
 
     const kv = (k, v) => new TableRow({
@@ -457,7 +505,6 @@ function UserDetailsPage() {
       ]
     });
 
-    // Activity table
     const activityHeader = new TableRow({
       children: ['Time', 'Type', 'Details', 'IP', 'Suspicious'].map(h =>
         new TableCell({ children: [new Paragraph({ text: h, bold: true })] })
@@ -479,7 +526,6 @@ function UserDetailsPage() {
       rows: [activityHeader, ...activityRows]
     });
 
-    // Optional chart image
     let chartParagraph = null;
     if (chartsRef?.current) {
       const canvas = await html2canvas(chartsRef.current, { scale: 2, backgroundColor: '#ffffff' });
@@ -493,8 +539,6 @@ function UserDetailsPage() {
     }
 
     const children = [];
-
-    // Logo header
     if (logoBuf) {
       children.push(
         new Paragraph({
@@ -504,7 +548,6 @@ function UserDetailsPage() {
       );
     }
 
-    // Title + meta
     children.push(
       new Paragraph({ text: `${COMPANY.name}`, heading: HeadingLevel.HEADING_2 }),
       new Paragraph({ text: `User Report`, heading: HeadingLevel.TITLE }),
@@ -514,31 +557,25 @@ function UserDetailsPage() {
       new Paragraph({ text: `Duration: ${label}`, spacing: { after: 300 } }),
     );
 
-    // Topics
     children.push(new Paragraph({ text: `Topics in this report:`, heading: HeadingLevel.HEADING_2 }));
     const builtInTopics = ['Personal Information', 'Summary', 'Recent Activities', 'Charts & Diagrams'];
-    [...builtInTopics, ...(topicTypes.length ? ['Activity Types: ' + topicTypes.join(', ')] : [])]
-      .forEach(t => children.push(new Paragraph(`• ${t}`)));
+    builtInTopics.forEach(t => children.push(new Paragraph(`• ${t}`)));
     children.push(new Paragraph({ text: '' }));
 
-    // Personal Info
     children.push(new Paragraph({ text: 'Personal Information', heading: HeadingLevel.HEADING_2 }));
     children.push(infoTable);
     children.push(new Paragraph({ text: '' }));
 
-    // Summary
     children.push(new Paragraph({ text: 'Summary', heading: HeadingLevel.HEADING_2 }));
     children.push(new Paragraph(`Duration: ${label}`));
     children.push(new Paragraph(`Grouped by: ${groupBy || 'hour'}`));
     children.push(new Paragraph(`Logs included: ${filteredActivities.length}`));
     children.push(new Paragraph({ text: '' }));
 
-    // Activities
     children.push(new Paragraph({ text: 'Recent Activities', heading: HeadingLevel.HEADING_2 }));
     children.push(activityTable);
     children.push(new Paragraph({ text: '' }));
 
-    // Charts
     if (chartParagraph) {
       children.push(new Paragraph({ text: 'Charts & Diagrams', heading: HeadingLevel.HEADING_2 }));
       children.push(chartParagraph);
@@ -679,18 +716,17 @@ function UserDetailsPage() {
           >
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-lg font-semibold" style={{ color: 'var(--im-text)', margin: 0 }}>Personal Information</h3>
-              {/*<button className="flex items-center text-sm font-medium" style={{ color: 'var(--im-accent)' }}>*/}
-              {/*  Edit <FiEdit2 className="ml-1" />*/}
-              {/*</button>*/}
+
+              {/* Only admins/superusers see the Edit button */}
+              {canManage && (
                 <button
                   className="flex items-center text-sm font-medium"
                   style={{ color: 'var(--im-accent)' }}
                   onClick={() => navigate(`/users/${user?.id || userId}/edit`)}
-
                 >
                   Edit <FiEdit2 className="ml-1" />
                 </button>
-
+              )}
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm" style={{ color: 'var(--im-text)' }}>
@@ -716,6 +752,7 @@ function UserDetailsPage() {
                   onChange={handleSuspendChange}
                   className="border px-2 py-1 rounded"
                   style={{ background: 'var(--im-surface)', color: 'var(--im-text)', border: '1px solid var(--im-border)' }}
+                  disabled={!canManage}
                 >
                   <option value="No">No</option>
                   <option value="Yes">Yes</option>
@@ -723,15 +760,18 @@ function UserDetailsPage() {
               </div>
             </div>
 
-            <div className="mt-6 text-right">
-              <button
-                onClick={handleDelete}
-                className="text-white font-medium px-4 py-2 rounded"
-                style={{ background: '#ef4444' }}
-              >
-                🗑️ Delete User
-              </button>
-            </div>
+            {/* Only admins/superusers see the Delete button */}
+            {canManage && (
+              <div className="mt-6 text-right">
+                <button
+                  onClick={handleDelete}
+                  className="text-white font-medium px-4 py-2 rounded"
+                  style={{ background: '#ef4444' }}
+                >
+                  🗑️ Delete User
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Activities */}

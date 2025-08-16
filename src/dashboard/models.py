@@ -1,7 +1,4 @@
-
-
-# Create your models here.
-# src/dashboard/models.py (or a new app "config")
+# src/dashboard/models.py
 from django.db import models
 
 class RealtimeSettings(models.Model):
@@ -15,6 +12,11 @@ class RealtimeSettings(models.Model):
 
     sound_enabled = models.BooleanField(default=True)
 
+    # NEW: writable URLs (persist dropdown selections)
+    sound_normal_url = models.CharField(max_length=512, blank=True, null=True)
+    sound_high_url   = models.CharField(max_length=512, blank=True, null=True)
+
+    # Optional uploaded files (also supported)
     sound_normal_file = models.FileField(upload_to="sounds/", null=True, blank=True)
     sound_normal_volume = models.FloatField(default=0.55)
     sound_normal_repeat_ms = models.PositiveIntegerField(default=0)
@@ -24,6 +26,7 @@ class RealtimeSettings(models.Model):
     sound_high_volume = models.FloatField(default=0.75)
     sound_high_repeat_ms = models.PositiveIntegerField(default=1500)
     sound_high_max_ms = models.PositiveIntegerField(default=10000)
+
     banner_title = models.CharField(max_length=200, default="⚠️ Real-Time Threat Alert")
     template_normal = models.TextField(default="{user} triggered anomaly with score {score_pct}% — {reason}")
     template_high = models.TextField(default="🚨 {user} triggered HIGH anomaly ({score_pct}%) — {reason}")
@@ -32,9 +35,9 @@ class RealtimeSettings(models.Model):
 
     updated_at = models.DateTimeField(auto_now=True)
 
-
     def save(self, *a, **kw):
         self.pk = 1  # force singleton row
         super().save(*a, **kw)
 
-    def __str__(self): return "Realtime Settings"
+    def __str__(self):
+        return "Realtime Settings"

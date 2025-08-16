@@ -1,24 +1,40 @@
+// // MainLayout.jsx
+// import React from "react";
+// import { Outlet } from "react-router-dom";
+// import Navbar from "./components/Navbar";
+// import GlobalAlertBanner from "./components/GlobalAlertBanner";
+//
+//
+// export default function MainLayout({ setAuth }) {
+//
+//   return (
+//     <>
+//       <Navbar setAuth={setAuth} />
+//       <GlobalAlertBanner />
+//
+//       <Outlet />
+//     </>
+//   );
+// }
+
 // MainLayout.jsx
 import React from "react";
 import { Outlet } from "react-router-dom";
 import Navbar from "./components/Navbar";
 import GlobalAlertBanner from "./components/GlobalAlertBanner";
-// import EmergencyOverlay from "./components/EmergencyOverlay";
-// import { useAlerts } from "./components/GlobalAlertsProvider";
-// import { useRealtimeSettings } from "./components/RealtimeSettingsContext";
+import { useMe } from "./components/RoleGuards";
 
 export default function MainLayout({ setAuth }) {
-  // const { emergency } = useAlerts();
-  // const { settings: s } = useRealtimeSettings() || {};
+  const { me, loading } = useMe();
 
-  // const NAVBAR_HEIGHT = 64;   // adjust to your actual navbar height
-  // const BANNER_HEIGHT = 96;   // approx height of the fixed banner
+  const role = (me?.role || "").toLowerCase();
+  // Show nav only to admin OR Django superuser (and optionally role "superuser")
+  const canSeeNav = !!(me && (me.is_superuser || role === "admin" || role === "superuser"));
 
   return (
     <>
-      <Navbar setAuth={setAuth} />
+      {!loading && canSeeNav && <Navbar setAuth={setAuth} />}
       <GlobalAlertBanner />
-
       <Outlet />
     </>
   );

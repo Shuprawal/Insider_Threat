@@ -19,6 +19,7 @@ from rest_framework.permissions import AllowAny
 
 from Dissertation import settings
 from ThreatDetection.models import CustomUser, ActivityLogs, Alerts, PasswordResetToken
+from ThreatDetection.serializers import CustomUserSerializer
 from src.dashboard.forms import DateRangeForm
 from django.utils.timezone import now, timedelta
 import json
@@ -151,7 +152,6 @@ class CustomUserView(View):
             'total_pages': paginator.num_pages,
             'total_users': paginator.count
         })
-
 
 
 
@@ -331,6 +331,13 @@ class ActivateAccountView(View):
                 return JsonResponse({'error': 'Invalid or expired activation link.'}, status=400)
         except Exception as e:
             return JsonResponse({'error': str(e)}, status=400)
+
+
+@api_view(['GET'])
+def me_view(request):
+    user = request.user
+    serializer = CustomUserSerializer(user)
+    return Response(serializer.data)
 
 
 
@@ -710,25 +717,10 @@ def serialize_user_payload_for_editor_response_ultra_descriptive_v20250814(reque
     }
 
 class AdministrativeUserProfileEditView(APIView):
-    """
-    GET  /api/users/<id>/edit/   -> returns editable payload
-    PATCH/PUT/POST               -> updates fields (multipart or JSON)
-    """
-    # permission_classes = [IsAuthenticated]
-    # If you want to pin auth instead of using REST_FRAMEWORK defaults:
-    # from rest_framework_simplejwt.authentication import JWTAuthentication
-    # authentication_classes = [JWTAuthentication]
-
     def get(self, request, user_id):
 
         try:
-
             u = my_get_object_or_404(CustomUser, id=user_id)
-
-            # Admins can read anyone; non-admins can only read themselves
-            # if not (getattr(request.user, "is_staff", False) or request.user.id == u.id):
-            #     return Response({"error": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
-
             payload = serialize_user_payload_for_editor_response_ultra_descriptive_v20250814(request, u)
             return Response({"user": payload})
         except Exception as e:

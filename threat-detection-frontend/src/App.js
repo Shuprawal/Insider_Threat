@@ -1,3 +1,4 @@
+
 // src/App.js
 import React, { useEffect, useState, Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
@@ -22,7 +23,8 @@ import { RealtimeSettingsProvider } from './components/RealtimeSettingsContext';
 import SentinelWelcome from "./components/SentinelWelcome";
 import UserEditPage from './components/UserEditPage';
 import EmployeeDashboard from "./components/EmployeeDashboard";
-// import GetStartedPage from "./components/GetStartedPage";
+
+import { MeProvider, AdminOnly, NotAdminOnly, OwnerNotAdminOnly } from './components/RoleGuards';
 
 // Lazy-loaded page
 const RealtimeSettingsPage = React.lazy(() =>
@@ -40,7 +42,6 @@ export default function App() {
 
   return (
     <Router>
-      {/* Wrap routes in Suspense so lazy pages render with a fallback */}
       <Suspense fallback={<div>Loading…</div>}>
         <Routes>
           {/* Public */}
@@ -54,40 +55,127 @@ export default function App() {
           <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/password-setup/activate/:uid/:token" element={<PasswordSetupSt mode="activate" />} />
           <Route path="/password-setup/reset/:token" element={<PasswordSetupSt mode="reset" />} />
-            <Route path='/welcome' element={<SentinelWelcome />} />
-            {/*<Route path='/get-started' element={<GetStartedPage />} />*/}
-          {/* Protected branch */}
+          <Route path="/welcome" element={<SentinelWelcome />} />
+
+          {/* Protected branch — must be authenticated */}
           <Route
             element={
               isAuthenticated ? (
-                <RealtimeSettingsProvider>
-                  <GlobalAlertsProvider>
-                    <MainLayout setAuth={setIsAuthenticated} />
-                  </GlobalAlertsProvider>
-                </RealtimeSettingsProvider>
+                <MeProvider>
+                  <RealtimeSettingsProvider>
+                    <GlobalAlertsProvider>
+                      <MainLayout setAuth={setIsAuthenticated} />
+                    </GlobalAlertsProvider>
+                  </RealtimeSettingsProvider>
+                </MeProvider>
               ) : (
                 <Navigate to="/login" replace />
               )
             }
           >
-            <Route path="/register" element={<Register />} />
-            <Route path="/" element={<Dashboard setAuth={setIsAuthenticated} />} />
-            <Route path="/alerts" element={<AlertsPage setAuth={setIsAuthenticated} />} />
-            <Route path="/log" element={<CreateLogPage setAuth={setIsAuthenticated} />} />
-            <Route path="/session" element={<CreateSessionWizard setAuth={setIsAuthenticated} />} />
-            <Route path="/analyze" element={<LogAnalyzer setAuth={setIsAuthenticated} />} />
-            <Route path="/users" element={<UsersPage />} />
-            <Route path="/users/:userId" element={<UserDetailsPage />} />
-            <Route path="/users/username/:username" element={<UserDetailsPage />} />
+            {/* EXCEPTIONS first (non-admin access) */}
 
-              <Route path='/employee/dashboard' element={<EmployeeDashboard /> } />
+            {/* 1) UserDetailsPage — available to all authenticated users EXCEPT admins */}
+            <Route
+              path="/users/:userId"
+              element={
+                // <NotAdminOnly redirectTo="/">
+                  <UserDetailsPage />
+                // </NotAdminOnly>
+              }
+            />
+            <Route
+              path="/users/username/:username"
+              element={
+                  <UserDetailsPage />
+              }
+            />
 
+            {/* 2) Employee dashboard — only owners who are NOT admin/superuser */}
+            <Route
+              path="/employee/dashboard"
+              element={
+                // <OwnerNotAdminOnly redirectTo="/">
+                  <EmployeeDashboard />
+                // </OwnerNotAdminOnly>
+              }
+            />
 
-            <Route path="/settings/realtime" element={<RealtimeSettingsPage />} />
-            <Route path="/users/:userId/edit" element={<UserEditPage />} />
+            {/* EVERYTHING ELSE in protected branch — ADMIN ONLY */}
+            <Route
+              path="/register"
+              element={
+                <AdminOnly redirectTo="/">
+                  <Register />
+                </AdminOnly>
+              }
+            />
+            <Route
+              path="/"
+              element={
+                <AdminOnly redirectTo="/dashboard">
+                  <Dashboard setAuth={setIsAuthenticated} />
+                </AdminOnly>
+              }
+            />
+            <Route
+              path="/alerts"
+              element={
+                <AdminOnly redirectTo="/">
+                  <AlertsPage setAuth={setIsAuthenticated} />
+                </AdminOnly>
+              }
+            />
+            <Route
+              path="/log"
+              element={
+                <AdminOnly redirectTo="/">
+                  <CreateLogPage setAuth={setIsAuthenticated} />
+                </AdminOnly>
+              }
+            />
+            <Route
+              path="/session"
+              element={
+                <AdminOnly redirectTo="/">
+                  <CreateSessionWizard setAuth={setIsAuthenticated} />
+                </AdminOnly>
+              }
+            />
+            <Route
+              path="/analyze"
+              element={
+                <AdminOnly redirectTo="/">
+                  <LogAnalyzer setAuth={setIsAuthenticated} />
+                </AdminOnly>
+              }
+            />
+            <Route
+              path="/users"
+              element={
+                <AdminOnly redirectTo="/">
+                  <UsersPage />
+                </AdminOnly>
+              }
+            />
+            <Route
+              path="/settings/realtime"
+              element={
+                <AdminOnly redirectTo="/">
+                  <RealtimeSettingsPage />
+                </AdminOnly>
+              }
+            />
+            <Route
+              path="/users/:userId/edit"
+              element={
+                <AdminOnly redirectTo="/">
+                  <UserEditPage />
+                </AdminOnly>
+              }
+            />
           </Route>
 
-          {/* Fallback */}
           <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
       </Suspense>
