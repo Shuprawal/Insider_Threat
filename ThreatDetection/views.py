@@ -15,6 +15,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 from .auth_utils import generate_auth_token
 
+# threatDetection/views
 SESSION_STORE = {}
 
 @csrf_exempt
@@ -119,12 +120,12 @@ def get_authenticated_user(request):
         return None
 
     token = auth_header.replace('Bearer ', '')
-    print("🔑 Token extracted:", token)
+    print(" Token extracted:", token)
 
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
         user_id = payload.get("user_id")
-        print("🧠 Matched user ID:", user_id)
+        print(" Matched user ID:", user_id)
 
         if not user_id:
             return None

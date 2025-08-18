@@ -32,16 +32,6 @@ from rest_framework.response import Response
 from django.utils import timezone
 
 
-
-
-
-from django.views import View
-from django.http import JsonResponse
-from django.core.paginator import Paginator
-from django.db.models import Q, Count, Max, Subquery, OuterRef, IntegerField, DateTimeField, Value
-from django.db.models.functions import Coalesce
-from ThreatDetection.models import Alerts
-
 from django.views import View
 from django.http import JsonResponse
 from django.core.paginator import Paginator
@@ -177,64 +167,52 @@ def _abs_pic_url(request, obj):
     except Exception:
         return None
 
+
+
+
 @method_decorator(csrf_exempt, name='dispatch')
 class RegistrationView(View):
-    def get(self, request, *args, **kwargs):
-        return JsonResponse({'error': 'Only POST allowed'}, status=405)
-
     def post(self, request, *args, **kwargs):
         try:
-            # Because the frontend sends FormData (multipart/form-data),
-            # use request.POST and request.FILES (NOT json.loads(request.body))
-            data = request.POST
+            # make it mutable
+            data = request.POST.copy()
             files = request.FILES
 
-
-
-            username = normalize_title_whitespace(data.get('username'))
+            # normalize & validate
+            username = normalize_title_whitespace(data.get('username', ''))
             if not username:
                 return JsonResponse({'error': 'Username is required.'}, status=400)
+            data['username'] = username  # now safe to write
 
-            # ✅ Username already taken? Suggest alternatives
+            first_name = data.get('first_name', '')
+            if first_name:
+                if not is_valid_person_name(first_name):
+                    return JsonResponse({'error': 'First name may only contain letters and spaces.'}, status=400)
+                data['first_name'] = normalize_title_whitespace(first_name)
+
+            last_name = data.get('last_name', '')
+            if last_name:
+                if not is_valid_person_name(last_name):
+                    return JsonResponse({'error': 'Last name may only contain letters and spaces.'}, status=400)
+                data['last_name'] = normalize_title_whitespace(last_name)
+
+            # pre-check username (optional)
             if CustomUser.objects.filter(username__iexact=username).exists():
                 return JsonResponse({
                     'error': 'Username already exists. Please choose another.',
                     'suggestions': suggest_usernames(username, n=5)
                 }, status=400)
 
-            first_name = data.get('first_name', '')
-            last_name = data.get('last_name', '')
-
-            if first_name:
-                if not is_valid_person_name(first_name):
-                    return JsonResponse({'error': 'First name may only contain letters and spaces.'}, status=400)
-                data['first_name'] = normalize_title_whitespace(first_name)
-
-            if last_name:
-                if not is_valid_person_name(last_name):
-                    return JsonResponse({'error': 'Last name may only contain letters and spaces.'}, status=400)
-                data['last_name'] = normalize_title_whitespace(last_name)
-
-            # Validate/sanitize via form; be sure your form includes all fields you need
+            # run ModelForm validation with the sanitized, mutable data
             form = RegistrationForm(data, files=files)
             if not form.is_valid():
                 errors = {field: errs[0] for field, errs in form.errors.items()}
-
-                desired = (data.get('username') or '').strip()
-                # Make the banner message show the most relevant single error instead of "Validation error"
                 top_msg = next(iter(errors.values()), 'Validation error')
-
-                payload = {
-                    'error': top_msg,
-                    'errors': errors,
-                }
-
+                payload = {'error': top_msg, 'errors': errors}
                 if 'username' in errors:
-                    payload['suggestions'] = suggest_usernames(desired, n=5)
-
+                    payload['suggestions'] = suggest_usernames(username, n=5)
                 return JsonResponse(payload, status=400)
 
-            # Create user inactive (password set after email activation)
             user = form.save(commit=False)
             user.is_active = False
             user.set_unusable_password()
@@ -243,71 +221,169 @@ class RegistrationView(View):
             timeout = settings.SIGNUP_ACTIVATION_TIMEOUT_SECONDS
             delete_if_unfinished_signup.apply_async(args=[user.id], countdown=timeout)
 
-
-            # Build activation link (frontend will handle password set)
             frontend_origin = os.getenv('FRONTEND_ORIGIN', 'http://localhost:3000')
             token = default_token_generator.make_token(user)
             uid = user.pk
-            # activation_url = f"{frontend_origin}/activate/{uid}/{token}/"
             activation_url = f"{frontend_origin}/password-setup/activate/{uid}/{token}"
 
-            # Pretty HTML email + plain text fallback
-            subject = "Confirm your registration"
-            plain = (
-                "Hi!\n\n"
-                "Please click this link to activate your account and set your password:\n"
-                f"{activation_url}\n\n"
-                "If you didn’t request this, you can ignore this email."
-            )
-            html = f"""
-                <div style="font-family: Arial, sans-serif; color: #222;">
-                    <h2>Welcome to Insider Threat Detection!</h2>
-                    <p>Thank you for registering.</p>
-                    <p><b>To activate your account and set your password, click the button below:</b></p>
-                    <p style="text-align: center; margin: 30px 0;">
-                        <a href="{activation_url}" style="
-                            display: inline-block;
-                            background: #2563eb;
-                            color: #fff;
-                            text-decoration: none;
-                            padding: 14px 28px;
-                            border-radius: 8px;
-                            font-size: 18px;
-                            font-weight: bold;
-                            box-shadow: 0 2px 8px #0002;
-                        ">
-                            Activate My Account
-                        </a>
-                    </p>
-                    <p style="font-size: 13px; color: #888;">
-                        If the button doesn’t work, copy and paste this link in your browser:<br>
-                        <a href="{activation_url}" style="color: #2563eb;">{activation_url}</a>
-                    </p>
-                    <hr style="border:none; border-top:1px solid #eee; margin:24px 0;" />
-                    <p style="font-size:12px; color:#bbb;">
-                        If you didn’t request this, you can ignore this email.
-                    </p>
-                </div>
-            """
-
             send_mail(
-                subject,
-                plain,  # fallback plain text
+                "Confirm your registration",
+                f"Activate and set password:\n{activation_url}",
                 getattr(settings, 'DEFAULT_FROM_EMAIL', 'no-reply@example.com'),
                 [user.email],
-                fail_silently=False,
-                html_message=html,
+                html_message=f"""<p>Activate your account:</p>
+                                 <p><a href="{activation_url}">Activate My Account</a></p>""",
             )
 
-            return JsonResponse({
-                'success': True,
-                'message': 'Please check your email to activate your account.'
-            })
+            return JsonResponse({'success': True, 'message': 'Please check your email to activate your account.'})
 
         except Exception as e:
-            # Always return JSON on error
             print("❌ Registration error:", str(e))
             return JsonResponse({'error': str(e)}, status=400)
+
+
+
+
+
+
+
+
+# @method_decorator(csrf_exempt, name='dispatch')
+# class RegistrationView(View):
+#     def get(self, request, *args, **kwargs):
+#         return JsonResponse({'error': 'Only POST allowed'}, status=405)
+#
+#     def post(self, request, *args, **kwargs):
+#         try:
+#             # Because the frontend sends FormData (multipart/form-data),
+#             # use request.POST and request.FILES (NOT json.loads(request.body))
+#             data = request.POST
+#             files = request.FILES
+#
+#
+#
+#             username = normalize_title_whitespace(data.get('username'))
+#             # email = normalize_title_whitespace(data.get('email'))
+#
+#             if not username:
+#                 return JsonResponse({'error': 'Username is required.'}, status=400)
+#
+#
+#
+#             # ✅ Username already taken? Suggest alternatives
+#             if CustomUser.objects.filter(username__iexact=username).exists():
+#                 return JsonResponse({
+#                     'error': 'Username already exists. Please choose another.',
+#                     'suggestions': suggest_usernames(username, n=5)
+#                 }, status=400)
+#
+#             first_name = data.get('first_name', '')
+#             last_name = data.get('last_name', '')
+#             email = data.get('email', '')
+#
+#             if first_name:
+#                 if not is_valid_person_name(first_name):
+#                     return JsonResponse({'error': 'First name may only contain letters and spaces.'}, status=400)
+#                 data['first_name'] = normalize_title_whitespace(first_name)
+#
+#             if last_name:
+#                 if not is_valid_person_name(last_name):
+#                     return JsonResponse({'error': 'Last name may only contain letters and spaces.'}, status=400)
+#                 data['last_name'] = normalize_title_whitespace(last_name)
+#
+#             # Validate/sanitize via form; be sure your form includes all fields you need
+#             form = RegistrationForm(data, files=files)
+#             if not form.is_valid():
+#                 errors = {field: errs[0] for field, errs in form.errors.items()}
+#
+#                 desired = (data.get('username') or '').strip()
+#                 # Make the banner message show the most relevant single error instead of "Validation error"
+#                 top_msg = next(iter(errors.values()), 'Validation error')
+#
+#                 payload = {
+#                     'error': top_msg,
+#                     'errors': errors,
+#                 }
+#
+#                 if 'username' in errors:
+#                     payload['suggestions'] = suggest_usernames(desired, n=5)
+#
+#                 return JsonResponse(payload, status=400)
+#
+#             # Create user inactive (password set after email activation)
+#             user = form.save(commit=False)
+#             user.is_active = False
+#             user.set_unusable_password()
+#             user.save()
+#
+#             timeout = settings.SIGNUP_ACTIVATION_TIMEOUT_SECONDS
+#             delete_if_unfinished_signup.apply_async(args=[user.id], countdown=timeout)
+#
+#
+#             # Build activation link (frontend will handle password set)
+#             frontend_origin = os.getenv('FRONTEND_ORIGIN', 'http://localhost:3000')
+#             token = default_token_generator.make_token(user)
+#             uid = user.pk
+#             # activation_url = f"{frontend_origin}/activate/{uid}/{token}/"
+#             activation_url = f"{frontend_origin}/password-setup/activate/{uid}/{token}"
+#
+#             # Pretty HTML email + plain text fallback
+#             subject = "Confirm your registration"
+#             plain = (
+#                 "Hi!\n\n"
+#                 "Please click this link to activate your account and set your password:\n"
+#                 f"{activation_url}\n\n"
+#                 "If you didn’t request this, you can ignore this email."
+#             )
+#             html = f"""
+#                 <div style="font-family: Arial, sans-serif; color: #222;">
+#                     <h2>Welcome to Insider Threat Detection!</h2>
+#                     <p>Thank you for registering.</p>
+#                     <p><b>To activate your account and set your password, click the button below:</b></p>
+#                     <p style="text-align: center; margin: 30px 0;">
+#                         <a href="{activation_url}" style="
+#                             display: inline-block;
+#                             background: #2563eb;
+#                             color: #fff;
+#                             text-decoration: none;
+#                             padding: 14px 28px;
+#                             border-radius: 8px;
+#                             font-size: 18px;
+#                             font-weight: bold;
+#                             box-shadow: 0 2px 8px #0002;
+#                         ">
+#                             Activate My Account
+#                         </a>
+#                     </p>
+#                     <p style="font-size: 13px; color: #888;">
+#                         If the button doesn’t work, copy and paste this link in your browser:<br>
+#                         <a href="{activation_url}" style="color: #2563eb;">{activation_url}</a>
+#                     </p>
+#                     <hr style="border:none; border-top:1px solid #eee; margin:24px 0;" />
+#                     <p style="font-size:12px; color:#bbb;">
+#                         If you didn’t request this, you can ignore this email.
+#                     </p>
+#                 </div>
+#             """
+#
+#             send_mail(
+#                 subject,
+#                 plain,  # fallback plain text
+#                 getattr(settings, 'DEFAULT_FROM_EMAIL', 'no-reply@example.com'),
+#                 [user.email],
+#                 fail_silently=False,
+#                 html_message=html,
+#             )
+#
+#             return JsonResponse({
+#                 'success': True,
+#                 'message': 'Please check your email to activate your account.'
+#             })
+#
+#         except Exception as e:
+#             # Always return JSON on error
+#             print("❌ Registration error:", str(e))
+#             return JsonResponse({'error': str(e)}, status=400)
 
 
 from django.contrib.auth import get_user_model

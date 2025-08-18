@@ -18,10 +18,8 @@ def delete_if_unfinished_signup(user_id):
     window = int(getattr(settings, "SIGNUP_ACTIVATION_TIMEOUT_SECONDS", 3600))
     cutoff = timezone.now() - timedelta(seconds=window)
 
-    # pick a creation timestamp that exists
     created = getattr(u, "created_at", None) or getattr(u, "date_joined", None)
     if created is None:
-        # fallback: if somehow missing, don't delete
         return
 
     password_missing = (not u.has_usable_password()) or (not u.password)

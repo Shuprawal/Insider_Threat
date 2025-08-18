@@ -102,7 +102,7 @@ export default function Navbar({ setAuth }) {
           <button className={`im-nav__link ${isActive('/alerts') ? 'is-active' : ''}`} onClick={() => go('/alerts')}>Alerts</button>
           {/*<button className={`im-nav__link ${isActive('/analyze') ? 'is-active' : ''}`} onClick={() => go('/analyze')}>Analyze</button>*/}
           <button className={`im-nav__link ${isActive('/settings/realtime') ? 'is-active' : ''}`} onClick={() => go('/settings/realtime')}>Realtime Settings</button>
-          {/*<SoundUnlocker />*/}
+          <SoundUnlocker />
         </div>
 
         {/* Right: actions + theme */}

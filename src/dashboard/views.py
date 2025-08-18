@@ -44,27 +44,27 @@ def _local_day_bounds_to_utc(d):
 class DashboardView(View):
     def get(self, request):
 
-        user = getattr(request, "user", None)
-        if not getattr(user, "is_authenticated", False):
-            return JsonResponse({"detail": "Authentication credentials were not provided."}, status=401)
-
-        role = (getattr(user, "role", "") or "").lower()
-        is_admin_like = (role == "admin") or bool(getattr(user, "is_superuser", False))
-
-        if not is_admin_like:
-            # If it looks like a page navigation, do a real HTTP redirect
-            accepts = request.META.get("HTTP_ACCEPT", "")
-            if "text/html" in accepts:
-                return redirect("/employee/dashboard")
-
-            # If it's an API call (fetch/axios), return a 403 with a redirect hint
-            return JsonResponse(
-                {
-                    "detail": "Employees should use the Employee Dashboard.",
-                    "redirect_to": "/employee/dashboard",
-                },
-                status=403,
-            )
+        # user = getattr(request, "user", None)
+        # if not getattr(user, "is_authenticated", False):
+        #     return JsonResponse({"detail": "Authentication credentials were not provided."}, status=401)
+        #
+        # role = (getattr(user, "role", "") or "").lower()
+        # is_admin_like = (role == "admin") or bool(getattr(user, "is_superuser", False))
+        #
+        # if not is_admin_like:
+        #     # If it looks like a page navigation, do a real HTTP redirect
+        #     accepts = request.META.get("HTTP_ACCEPT", "")
+        #     if "text/html" in accepts:
+        #         return redirect("/employee/dashboard")
+        #
+        #     # If it's an API call (fetch/axios), return a 403 with a redirect hint
+        #     return JsonResponse(
+        #         {
+        #             "detail": "Employees should use the Employee Dashboard.",
+        #             "redirect_to": "/employee/dashboard",
+        #         },
+        #         status=403,
+        #     )
 
 
         try:
@@ -305,7 +305,7 @@ class DashboardView(View):
 
 
 
-# dashboard/views_realtime.py
+
 from django.db import transaction
 from rest_framework.views import APIView
 from rest_framework.response import Response

@@ -101,10 +101,7 @@ class AuditLogs(models.Model):
 
 
 class UserDailyAgg(models.Model):
-    """
-    One row per user per calendar day of aggregated behavior.
-    Used for real-time scoring & cold-start handling.
-    """
+
     user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, db_index=True)
     day = models.DateField(db_index=True)
 
@@ -128,12 +125,8 @@ class CohortBaseline(models.Model):
     cohort_role = models.CharField(max_length=50, blank=True, db_index=True)
     cohort_department = models.CharField(max_length=100, blank=True, db_index=True)
     feature_name = models.CharField(max_length=100, db_index=True)
-
-    # robust stats
     median = models.FloatField(default=0.0)
     mad = models.FloatField(default=0.0)
-
-    # rolling/summary stats (these are what rebuild_cohort is writing)
     mean_7d  = models.FloatField(default=0.0)
     std_7d   = models.FloatField(default=0.0)
     mean_14d = models.FloatField(default=0.0)
@@ -148,9 +141,6 @@ class CohortBaseline(models.Model):
 
 
 class ModelConfig(models.Model):
-    """
-    Stores trained model path and scoring thresholds.
-    """
     name = models.CharField(max_length=100, default='daily_xgb', unique=True)
     bundle_path = models.CharField(max_length=255)
     decision_threshold = models.FloatField(default=0.9)
