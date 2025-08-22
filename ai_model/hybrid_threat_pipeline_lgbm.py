@@ -2,16 +2,28 @@ import os, glob, joblib, numpy as np, pandas as pd, argparse, json
 from datetime import datetime
 from typing import Tuple
 
+# Silence macOS Tk deprecation noise (does not affect training)
+os.environ.setdefault("TK_SILENCE_DEPRECATION", "1")
+
+# =============================
+# Plotting mode (can be overridden by CLI)
+# =============================
+PLOT_MODE = "auto"  # "show" | "save" | "none" | "auto"
+PLOTS_DIR = None     # set after HERE is known
+
 # ---------- Matplotlib backend handling (non-blocking) ----------
 import matplotlib
 try:
-    # Try a GUI backend first (Mac: "MacOSX"; widely available: "TkAgg")
-    matplotlib.use("TkAgg")
+    # Try a GUI backend first (Mac: "MacOSX" if available; fallback to TkAgg)
+    try:
+        matplotlib.use("MacOSX")
+    except Exception:
+        matplotlib.use("TkAgg")
 except Exception:
-    matplotlib.use("Agg")  # headless fallback
+    matplotlib.use("Agg")  # headless fallback (no windows)
 
 import matplotlib.pyplot as plt
-plt.ion()  # interactive mode on (so windows can appear without blocking)
+plt.ion()  # interactive mode on (windows can appear without blocking when 'show')
 
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import StandardScaler
@@ -28,6 +40,9 @@ from xgboost import XGBClassifier
 # Defaults / Config
 # =============================
 HERE = os.path.abspath(os.path.dirname(__file__))
+if PLOTS_DIR is None:
+    PLOTS_DIR = os.path.join(HERE, "figures")
+
 DATA_DIR = os.path.join(HERE, "datasets")
 OUT_PKL = os.path.join(HERE, "final_hybrid_threat_model_daily.pkl")
 OUT_COMBINED = os.path.join(HERE, "final_combined_dataset.csv")
@@ -61,20 +76,67 @@ NO_PLOTS = False
 FAST = False
 
 # =============================
-# Helpers
+# Plot helpers
 # =============================
-def _show_now():
-    """Show matplotlib figure without blocking; keep it visible briefly for screenshots."""
-    if NO_PLOTS:
-        plt.close()
-        return
-    try:
-        plt.show(block=False)
-        plt.pause(4.0)   # time to screenshot; tweak as needed
-        plt.close()
-    except Exception:
-        plt.close()
+def _ensure_dir(path: str):
+    os.makedirs(path, exist_ok=True)
 
+def _safe_name(s: str) -> str:
+    bad = '<>:"/\\|?*'
+    for ch in bad:
+        s = s.replace(ch, "_")
+    return s.replace(" ", "_")
+
+def _show_now(title: str = "figure"):
+    """
+    Show or save the current matplotlib figure depending on PLOT_MODE/backends.
+    This does NOT change training behaviour.
+    """
+    global PLOT_MODE, PLOTS_DIR
+    fig = plt.gcf()
+
+    if NO_PLOTS or PLOT_MODE == "none":
+        plt.close(fig)
+        return
+
+    backend = matplotlib.get_backend().lower()
+
+    # Decide behavior for "auto"
+    mode = PLOT_MODE
+    if PLOT_MODE == "auto":
+        # If backend is non-interactive -> save; otherwise show
+        non_interactive = ("agg", "pdf", "svg", "ps", "cairo")
+        mode = "save" if any(b in backend for b in non_interactive) else "show"
+
+    if mode == "show":
+        try:
+            plt.show(block=False)
+            plt.pause(1.0)  # short pause; not performance heavy
+        except Exception:
+            # If showing fails (e.g., headless), fallback to save
+            mode = "save"
+        else:
+            plt.close(fig)
+
+    if mode == "save":
+        try:
+            _ensure_dir(PLOTS_DIR)
+            try:
+                plt.tight_layout()
+            except Exception:
+                pass
+            fname = f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-{_safe_name(title)}.png"
+            out_path = os.path.join(PLOTS_DIR, fname)
+            fig.savefig(out_path, dpi=160, bbox_inches="tight")
+            print(f"🖼️  Saved plot -> {out_path}")
+        except Exception as e:
+            print(f"(could not save plot: {e})")
+        finally:
+            plt.close(fig)
+
+# =============================
+# Data & feature helpers
+# =============================
 def load_all_csvs(data_dir: str) -> pd.DataFrame:
     print(f"📂 Reading CSVs from: {data_dir}")
     paths = sorted(glob.glob(os.path.join(data_dir, "*.csv")))
@@ -165,7 +227,7 @@ def print_quantiles(scores: np.ndarray, label: str):
     print(f"\nScore quantiles ({label}): 50% {qs[0]:.4f} | 90% {qs[1]:.4f} | 95% {qs[2]:.4f} | "
           f"99% {qs[3]:.4f} | 99.5% {qs[4]:.4f} | 99.9% {qs[5]:.4f}")
 
-# ---------- Display-only plotting helpers (non-blocking) ----------
+# ---------- Display-only plotting helpers ----------
 def _show_confusion_heatmap(cm, title="Confusion Matrix"):
     fig, ax = plt.subplots(figsize=(4.6, 4.1))
     ax.imshow(cm, interpolation="nearest")
@@ -176,30 +238,30 @@ def _show_confusion_heatmap(cm, title="Confusion Matrix"):
     for (i,j), v in np.ndenumerate(cm):
         ax.text(j, i, f"{v}", ha="center", va="center")
     plt.tight_layout()
-    _show_now()
+    _show_now(title)
 
 def _show_roc_pr(y_true, scores, title_prefix=""):
     # ROC
     try:
         fpr, tpr, _ = roc_curve(y_true, scores)
         fig, ax = plt.subplots(figsize=(5.0, 4.2))
-        ax.plot(fpr, tpr, label="ROC")
+        ax.plot(fpr, tpr)
         ax.plot([0,1],[0,1], linestyle="--")
         ax.set_title(f"{title_prefix} ROC Curve")
         ax.set_xlabel("False Positive Rate"); ax.set_ylabel("True Positive Rate")
         plt.tight_layout()
-        _show_now()
+        _show_now(f"{title_prefix}_ROC")
     except Exception as e:
         print(f"(ROC not available: {e})")
     # PR
     try:
         p, r, _ = precision_recall_curve(y_true, scores)
         fig, ax = plt.subplots(figsize=(5.0, 4.2))
-        ax.plot(r, p, label="PR")
+        ax.plot(r, p)
         ax.set_title(f"{title_prefix} Precision–Recall Curve")
         ax.set_xlabel("Recall"); ax.set_ylabel("Precision")
         plt.tight_layout()
-        _show_now()
+        _show_now(f"{title_prefix}_PR")
     except Exception as e:
         print(f"(PR not available: {e})")
 
@@ -209,7 +271,7 @@ def _show_score_hist(scores, title="Score Distribution"):
     ax.set_title(title)
     ax.set_xlabel("Predicted Probability"); ax.set_ylabel("Count")
     plt.tight_layout()
-    _show_now()
+    _show_now(title)
 
 def _show_score_quantiles(scores):
     qs = np.quantile(scores, [0.5, 0.9, 0.95, 0.99, 0.995, 0.999])
@@ -220,7 +282,7 @@ def _show_score_quantiles(scores):
     ax.set_title("Score Distribution with Key Quantiles")
     ax.set_xlabel("Predicted Probability"); ax.set_ylabel("Count")
     plt.tight_layout()
-    _show_now()
+    _show_now("Score_Distribution_with_Quantiles")
 
 def _show_feature_importance(names, importances, topn=20):
     try:
@@ -233,7 +295,7 @@ def _show_feature_importance(names, importances, topn=20):
         ax.set_title(f"Top {len(order)} Feature Importances")
         ax.set_xlabel("Gain (XGBoost)")
         plt.tight_layout()
-        _show_now()
+        _show_now("Feature_Importances_Top")
     except Exception as e:
         print(f"(could not display feature importances: {e})")
 
@@ -248,7 +310,8 @@ def _show_p_at_k_curve(y_true, scores, ks):
     ax.set_title("Precision@K")
     ax.set_xlabel("K (top alerts)"); ax.set_ylabel("Precision")
     ax.grid(True, alpha=0.3)
-    plt.tight_layout(); _show_now()
+    plt.tight_layout()
+    _show_now("Precision_at_K")
 
 def _eval_and_print(y_true, scores, thr, title="TEST"):
     y_hat = (scores >= thr).astype(int)
@@ -290,7 +353,9 @@ def main(
     topk_export: int = DEFAULT_TOPK_EXPORT,
     p_at_k_values = DEFAULT_P_AT_K_VALUES
 ):
-    # Load & check
+    global PLOT_MODE, PLOTS_DIR
+
+    print(f"🖨️  Plot mode: {PLOT_MODE} | Figures dir: {PLOTS_DIR}")
     df = load_all_csvs(data_dir)
     required = set(['user','timestamp', LABEL] + BASE_FEATURES)
     missing = required - set(df.columns)
@@ -368,7 +433,7 @@ def main(
         n_cv_trials        = 15
     # -----------------------------------------------------------
 
-    # IsolationForest anomaly score
+    # IsolationForest anomaly score (training unaffected; only score added)
     iforest = IsolationForest(
         n_estimators=iforest_estimators,
         contamination=IFOREST_CONTAM,
@@ -414,7 +479,7 @@ def main(
         "colsample_bytree": [0.6, 0.8],
         "min_child_weight": [10.0, 15.0, 20.0],
         "reg_lambda": [2.0, 3.0, 4.0],
-        "n_estimators": [xgb_estimators]  # fix to the chosen size for speed consistency
+        "n_estimators": [xgb_estimators]  # fixed to keep training behaviour stable
     }
 
     # CV scorer uses EXACTLY the same alert rate as deployment threshold
@@ -487,13 +552,13 @@ def main(
         prec_k = precision_at_k(y_test[order], p_test[order], k)
         print(f"P@{K:<4}= {prec_k:.3f}")
 
-    # --------- EXTRA: compact metrics + on-screen figures ----------
+    # --------- EXTRA: compact metrics + figures ----------
     _ = _eval_and_print(y_test, p_test, thr, title="TEST (Full)")
 
     if not NO_PLOTS:
         _show_confusion_heatmap(confusion_matrix(y_test, (p_test >= thr).astype(int)),
                                 title="Confusion Matrix (Full Test)")
-        _show_roc_pr(y_test, p_test, title_prefix="Full Test")
+        _show_roc_pr(y_test, p_test, title_prefix="Full_Test")
         _show_score_hist(p_test, title="Score Distribution (Full Test)")
         _show_score_quantiles(p_test)
         _show_p_at_k_curve(y_test, p_test, p_at_k_values)
@@ -507,7 +572,7 @@ def main(
             _eval_and_print(y_test[:m], p_test[:m], thr, title=f"TEST (first {m}) – {label}")
             _show_confusion_heatmap(confusion_matrix(y_test[:m], (p_test[:m] >= thr).astype(int)),
                                     title=f"Confusion Matrix (first {m}) – {label}")
-            _show_roc_pr(y_test[:m], p_test[:m], title_prefix=f"Subset {label}")
+            _show_roc_pr(y_test[:m], p_test[:m], title_prefix=f"Subset_{label}")
             _show_score_hist(p_test[:m], title=f"Score Distribution (first {m}) – {label}")
 
         _subset_eval("20k", 20_000)
@@ -542,7 +607,7 @@ def main(
     except Exception as e:
         print(f"(could not export/plot feature importances: {e})")
 
-    # Save bundle
+    # Save bundle (training unchanged)
     bundle = {
         'imputer': imputer,
         'scaling_module': scaler,
@@ -566,8 +631,8 @@ def main(
     print(f"\n✅ Model bundle saved -> {OUT_PKL}")
     print(f"Features used ({len(FEATURES_WITH_IF)}): {FEATURES_WITH_IF}")
 
-    # Final blocking show to keep windows open for screenshots
-    if not NO_PLOTS:
+    # Keep windows open only if explicitly showing
+    if not NO_PLOTS and PLOT_MODE in ("show", "auto") and matplotlib.get_backend().lower() not in ("agg","pdf","svg","ps","cairo"):
         try:
             print("\n(Press Ctrl+C to close figure windows.)")
             plt.ioff()
@@ -582,14 +647,21 @@ if __name__ == "__main__":
     parser.add_argument("--topk_export", type=int, default=DEFAULT_TOPK_EXPORT,
                         help="How many test rows to export in the ranked list.")
     parser.add_argument("--p_at_k_values", type=str, default=json.dumps(DEFAULT_P_AT_K_VALUES),
-                        help="JSON list of K values for P@K display, e.g. \"[5,10,25,50,100]\".")
+                        help='JSON list of K values for P@K display, e.g. "[5,10,25,50,100]".')
     parser.add_argument("--data_dir", type=str, default=DATA_DIR, help="Path to the datasets folder with CSVs.")
-    parser.add_argument("--no_plots", action="store_true", help="Disable interactive plots (fast/headless).")
+    parser.add_argument("--no_plots", action="store_true", help="Disable all plots completely.")
     parser.add_argument("--fast", action="store_true", help="Faster run: fewer trees, fewer CV trials, smaller IF.")
+    parser.add_argument("--plot_mode", choices=["show","save","none","auto"], default=PLOT_MODE,
+                        help="How to handle plots: show windows, save PNGs, disable, or auto-detect.")
+    parser.add_argument("--plots_dir", type=str, default=PLOTS_DIR,
+                        help="Directory where PNGs are saved when using save/auto modes.")
     args = parser.parse_args()
 
+    # Apply CLI flags
     NO_PLOTS = bool(args.no_plots)
     FAST = bool(args.fast)
+    PLOT_MODE = args.plot_mode if not NO_PLOTS else "none"
+    PLOTS_DIR = args.plots_dir
 
     p_at_k_vals = json.loads(args.p_at_k_values)
     main(
@@ -598,6 +670,7 @@ if __name__ == "__main__":
         topk_export=args.topk_export,
         p_at_k_values=p_at_k_vals
     )
+
 
 
 
