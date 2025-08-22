@@ -388,12 +388,7 @@ export default function EmployeeDashboard() {
               >
                 View Profile
               </button>
-              {/*<button*/}
-              {/*  className="ewdash-ghostbtn-sentinelY"*/}
-              {/*  onClick={() => navigate(`/users/${profile?.id || ""}/edit`)}*/}
-              {/*>*/}
-              {/*  Edit Profile*/}
-              {/*</button>*/}
+
               <button
                 className="ewdash-dangerbtn-sentinelY"
                 onClick={handleLogout}

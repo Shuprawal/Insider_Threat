@@ -15,12 +15,7 @@ from .forms import *
 # views.py
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
-from django.http import JsonResponse
-from django.views import View
-from django.utils import timezone
-from django.utils.dateparse import parse_datetime
-from django.db.models import Count, Avg
-from django.db.models.functions import TruncHour, TruncDay, TruncWeek, TruncMonth
+
 # views.py
 from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo

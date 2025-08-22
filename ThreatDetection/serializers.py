@@ -1,11 +1,4 @@
-#
-# from rest_framework import serializers
-# from .models import Log
-#
-# class LogSerializer(serializers.ModelSerializer):
-#     class Meta:
-#         model = Log
-#         fields = ['id', 'user', 'action', 'created_at']
+
 
 from rest_framework import serializers
 from .models import ActivityLogs, CustomUser, Alerts

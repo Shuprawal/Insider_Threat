@@ -1,19 +1,14 @@
-
-import pandas as pd
-import joblib
-import json
 import hashlib
-from .serializers import ActivityLogSerializer
-from ThreatDetection.auth_utils import *
-from django.utils.timezone import now, localtime
-from django.utils.timezone import make_aware
-from channels.layers import get_channel_layer
-from asgiref.sync import async_to_sync
-from .models import CustomUser, ActivityLogs, Alerts
-from io import TextIOWrapper
+import json
+
+from django.utils.timezone import localtime
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
+
+from ThreatDetection.auth_utils import *
 from .auth_utils import generate_auth_token
+from .models import ActivityLogs
+from .serializers import ActivityLogSerializer
 
 # threatDetection/views
 SESSION_STORE = {}
@@ -106,7 +101,7 @@ def custom_login(request):
 
 
 
-from ThreatDetection.models import Alerts, CustomUser
+from ThreatDetection.models import CustomUser
 import jwt
 from django.conf import settings
 
@@ -206,6 +201,11 @@ def custom_log_create(request):
 
     return JsonResponse({'error': 'Only POST allowed'}, status=405)
 
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated
+from ThreatDetection.authentication import CustomTokenAuthentication
+
 
 
 @csrf_exempt
@@ -219,11 +219,6 @@ def custom_log_list(request):
         return JsonResponse(serializer.data, safe=False)
     return JsonResponse({'error': 'Only GET allowed'}, status=405)
 
-
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
-from ThreatDetection.authentication import CustomTokenAuthentication
 
 
 class CustomLogListAllView(APIView):

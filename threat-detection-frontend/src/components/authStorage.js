@@ -96,11 +96,8 @@ export const clearWsTokenOverride = () => {
   localStorage.removeItem(WS_TOKEN_OVERRIDE_STORAGE_KEY_MAIN);
 };
 
-/* ───────────── Backwards-compat aliases (DO NOT BREAK EXISTING IMPORTS) ─────────────
-   Old names that other files import:
-   - TOKEN_KEY, REMEMBER_KEY, WS_TOKEN_OVERRIDE_KEY
-   - getToken, saveToken, clearToken, setAuthHeader, isRemembered
-*/
+
+
 export const TOKEN_KEY = TOKEN_STORAGE_KEY_MAIN;
 export const REMEMBER_KEY = REMEMBER_ME_STORAGE_KEY_MAIN;
 export const WS_TOKEN_OVERRIDE_KEY = WS_TOKEN_OVERRIDE_STORAGE_KEY_MAIN;

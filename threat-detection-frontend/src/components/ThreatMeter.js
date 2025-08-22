@@ -1,20 +1,15 @@
 import React, { useEffect, useRef, useState } from 'react';
 
-/**
- * InsiderRiskAnimatedProbabilityDonutGauge
- * A reusable animated donut that visualizes a probability (0..1) or percent (0..100),
- * shows a status pill, an optional “reason” string, and a tiny facts grid.
- */
 export default function ThreatMeter({
-  probabilityZeroToOne,            // number 0..1 (preferred)
-  percentZeroToHundred,            // number 0..100 (alternative)
-  modelDecisionThreshold,          // number 0..1 (to compute suspicious/ok)
-  explicitStatusOverride,          // 'suspicious' | 'ok' | 'idle' (optional)
+  probabilityZeroToOne,
+  percentZeroToHundred,
+  modelDecisionThreshold,
+  explicitStatusOverride,
   mainTitle = 'Latest threat',
   secondarySubtitle = '',
   humanReadableReason = '',
-  factoidDictionary = {},          // { label: value }
-  shouldRenderAndAnimate = false,  // mount/animate control
+  factoidDictionary = {},
+  shouldRenderAndAnimate = false,
   sizePx = 140,
   strokePx = 14,
 }) {

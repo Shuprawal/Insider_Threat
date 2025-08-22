@@ -45,12 +45,13 @@ export default function App() {
       <Suspense fallback={<div>Loading…</div>}>
         <Routes>
           {/* Public */}
-          <Route
-            path="/login"
-            element={
-              isAuthenticated ? <Navigate to="/" replace /> : <Login setAuth={setIsAuthenticated} />
-            }
-          />
+          {/*<Route*/}
+          {/*  path="/login"*/}
+          {/*  element={*/}
+          {/*    isAuthenticated ? <Navigate to="/" replace /> : <Login setAuth={setIsAuthenticated} />*/}
+          {/*  }*/}
+          {/*/>*/}
+            <Route path="/login" element={<Login />} />
           <Route path="/activate/:uid/:token" element={<ActivateAccount />} />
           <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/password-setup/activate/:uid/:token" element={<PasswordSetupSt mode="activate" />} />

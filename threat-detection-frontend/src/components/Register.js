@@ -7,11 +7,7 @@ import { getToken } from './authStorage';
 export default function Register({ setAuth }) {
   const departments = ['IT', 'HR', 'Finance', 'Legal', 'Security'];
 
-
-
     const HERO_IMAGE_URL = 'http://localhost:8000/static/img/cyber1.jpg';
-
-
 
   // Form state
   const [username, setUsername] = useState('');

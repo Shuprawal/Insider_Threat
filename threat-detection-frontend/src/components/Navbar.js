@@ -13,7 +13,6 @@ export default function Navbar({ setAuth }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
 
-  // 🔔 realtime bits
   const { emergency, soundMuted, toggleSound } = useAlerts();
   // Show the chip whenever an emergency is active (muted OR not)
   const showSoundChip = !!emergency;

@@ -1,16 +1,17 @@
-import os, glob, joblib, numpy as np, pandas as pd, argparse, json, sys
+import os, glob, joblib, numpy as np, pandas as pd, argparse, json
 from datetime import datetime
 from typing import Tuple
 
 # ---------- Matplotlib backend handling (non-blocking) ----------
 import matplotlib
 try:
-    # Try a GUI backend first (Mac: "MacOSX" if using python.org build; TkAgg is widely available)
+    # Try a GUI backend first (Mac: "MacOSX"; widely available: "TkAgg")
     matplotlib.use("TkAgg")
 except Exception:
-    matplotlib.use("Agg")  # headless fallback (no windows)
+    matplotlib.use("Agg")  # headless fallback
 
 import matplotlib.pyplot as plt
+plt.ion()  # interactive mode on (so windows can appear without blocking)
 
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import StandardScaler
@@ -55,23 +56,23 @@ DEFAULT_P_AT_K_VALUES = [5, 10, 25, 50, 100, 200]
 DEFAULT_ALERT_RATE = 0.001     # 0.1% of test as alert budget threshold
 DEFAULT_TOPK_EXPORT = 200      # rows to export for manual review
 
-# Will be set from CLI
+# will be set from CLI
 NO_PLOTS = False
+FAST = False
 
 # =============================
 # Helpers
 # =============================
 def _show_now():
-    """Show matplotlib figure without blocking. If headless, do nothing."""
+    """Show matplotlib figure without blocking; keep it visible briefly for screenshots."""
     if NO_PLOTS:
         plt.close()
         return
     try:
         plt.show(block=False)
-        plt.pause(2.0)  # keep visible briefly so you can screenshot; tweak as you like
+        plt.pause(4.0)   # time to screenshot; tweak as needed
         plt.close()
     except Exception:
-        # In headless mode or if backend not available
         plt.close()
 
 def load_all_csvs(data_dir: str) -> pd.DataFrame:
@@ -204,8 +205,19 @@ def _show_roc_pr(y_true, scores, title_prefix=""):
 
 def _show_score_hist(scores, title="Score Distribution"):
     fig, ax = plt.subplots(figsize=(5.0, 4.2))
-    ax.hist(scores, bins=40)
+    ax.hist(scores, bins=60)
     ax.set_title(title)
+    ax.set_xlabel("Predicted Probability"); ax.set_ylabel("Count")
+    plt.tight_layout()
+    _show_now()
+
+def _show_score_quantiles(scores):
+    qs = np.quantile(scores, [0.5, 0.9, 0.95, 0.99, 0.995, 0.999])
+    fig, ax = plt.subplots(figsize=(5.5, 3.6))
+    ax.hist(scores, bins=60)
+    for q in qs:
+        ax.axvline(q, linestyle="--")
+    ax.set_title("Score Distribution with Key Quantiles")
     ax.set_xlabel("Predicted Probability"); ax.set_ylabel("Count")
     plt.tight_layout()
     _show_now()
@@ -224,6 +236,19 @@ def _show_feature_importance(names, importances, topn=20):
         _show_now()
     except Exception as e:
         print(f"(could not display feature importances: {e})")
+
+def _show_p_at_k_curve(y_true, scores, ks):
+    order = np.argsort(scores)[::-1]
+    ys = []
+    for K in ks:
+        k = min(K, len(order))
+        ys.append(precision_at_k(y_true[order], scores[order], k))
+    fig, ax = plt.subplots(figsize=(5.0, 4.0))
+    ax.plot(ks, ys, marker="o")
+    ax.set_title("Precision@K")
+    ax.set_xlabel("K (top alerts)"); ax.set_ylabel("Precision")
+    ax.grid(True, alpha=0.3)
+    plt.tight_layout(); _show_now()
 
 def _eval_and_print(y_true, scores, thr, title="TEST"):
     y_hat = (scores >= thr).astype(int)
@@ -265,8 +290,6 @@ def main(
     topk_export: int = DEFAULT_TOPK_EXPORT,
     p_at_k_values = DEFAULT_P_AT_K_VALUES
 ):
-    global NO_PLOTS
-
     # Load & check
     df = load_all_csvs(data_dir)
     required = set(['user','timestamp', LABEL] + BASE_FEATURES)
@@ -302,7 +325,7 @@ def main(
     ]
     ALL_FEATS_NO_IF = BASE_FEATURES + EXTRA
 
-    # Persist combined
+    # Persist combined (optional artifact)
     df.to_csv(OUT_COMBINED, index=False)
     print(f"💾 Combined dataset written -> {OUT_COMBINED} (rows={len(df):,})")
 
@@ -334,9 +357,23 @@ def main(
     X_train_scaled = scaler.fit_transform(X_train_imp)
     X_test_scaled  = scaler.transform(X_test_imp)
 
+    # -------- speed knobs (only used when --fast is ON) --------
+    if FAST:
+        iforest_estimators = 100   # was 400
+        xgb_estimators     = 200   # was 800
+        n_cv_trials        = 5     # was 15
+    else:
+        iforest_estimators = 400
+        xgb_estimators     = 800
+        n_cv_trials        = 15
+    # -----------------------------------------------------------
+
     # IsolationForest anomaly score
     iforest = IsolationForest(
-        n_estimators=400, contamination=IFOREST_CONTAM, random_state=42, n_jobs=-1
+        n_estimators=iforest_estimators,
+        contamination=IFOREST_CONTAM,
+        random_state=42,
+        n_jobs=-1
     )
     iforest.fit(X_train_scaled)
     train_if = iforest.decision_function(X_train_scaled)
@@ -360,7 +397,7 @@ def main(
         learning_rate=0.05,
         subsample=0.85,
         colsample_bytree=0.6,
-        n_estimators=800,
+        n_estimators=xgb_estimators,
         reg_lambda=2.0,
         reg_alpha=0.0,
         min_child_weight=10.0,
@@ -377,7 +414,7 @@ def main(
         "colsample_bytree": [0.6, 0.8],
         "min_child_weight": [10.0, 15.0, 20.0],
         "reg_lambda": [2.0, 3.0, 4.0],
-        "n_estimators": [800, 1000, 1200]
+        "n_estimators": [xgb_estimators]  # fix to the chosen size for speed consistency
     }
 
     # CV scorer uses EXACTLY the same alert rate as deployment threshold
@@ -387,10 +424,11 @@ def main(
         return prec
 
     gkf = GroupKFold(n_splits=3)
+
     search = RandomizedSearchCV(
         estimator=base_xgb,
         param_distributions=param_dist,
-        n_iter=15,
+        n_iter=n_cv_trials,
         scoring=p_at_rate_scorer,
         cv=gkf.split(X_train, y_train, groups_train),
         random_state=42,
@@ -398,6 +436,15 @@ def main(
         verbose=1,
         n_jobs=-1
     )
+    # Optional downsample of training rows for fast demo
+    if FAST:
+        max_rows = 80_000
+        if len(X_train) > max_rows:
+            X_train = X_train[:max_rows]
+            y_train = y_train[:max_rows]
+            groups_train = groups_train[:max_rows]
+            print(f"⚡ FAST mode: training downsampled to {len(X_train)} rows")
+
     search.fit(X_train, y_train)
     best_xgb = search.best_estimator_
 
@@ -440,7 +487,7 @@ def main(
         prec_k = precision_at_k(y_test[order], p_test[order], k)
         print(f"P@{K:<4}= {prec_k:.3f}")
 
-    # --------- EXTRA: compact metrics + non-blocking on-screen figures ----------
+    # --------- EXTRA: compact metrics + on-screen figures ----------
     _ = _eval_and_print(y_test, p_test, thr, title="TEST (Full)")
 
     if not NO_PLOTS:
@@ -448,11 +495,11 @@ def main(
                                 title="Confusion Matrix (Full Test)")
         _show_roc_pr(y_test, p_test, title_prefix="Full Test")
         _show_score_hist(p_test, title="Score Distribution (Full Test)")
+        _show_score_quantiles(p_test)
+        _show_p_at_k_curve(y_test, p_test, p_at_k_values)
 
-        # Subset metrics for screenshots (first 20k and 40k rows of TEST, if available)
+        # Subset metrics (first 20k/40k rows if available)
         def _subset_eval(label, n):
-            if len(y_test) == 0:
-                return
             m = min(n, len(y_test))
             if m <= 0:
                 return
@@ -466,7 +513,7 @@ def main(
         _subset_eval("20k", 20_000)
         _subset_eval("40k", 40_000)
 
-    # Export artifacts (as before)
+    # Export artifacts
     topK = min(DEFAULT_TOPK_EXPORT, len(test_df))
     head_idx = order[:topK]
     top_out = test_df.iloc[head_idx].copy()
@@ -501,7 +548,7 @@ def main(
         'scaling_module': scaler,
         'iforest_module': iforest,
         'model': best_xgb,
-        'calibrator': None,  # no calibration
+        'calibrator': None,
         'training_input_features': FEATURES_WITH_IF,
         'decision_threshold': float(thr),
         'trained_at': datetime.utcnow().isoformat() + "Z",
@@ -511,13 +558,22 @@ def main(
             'alert_rate_cv_and_eval': alert_rate,
             'iforest_contamination': IFOREST_CONTAM,
             'roll_windows': ROLL_WINDOWS,
-            'scale_pos_weight': spw,
+            'scale_pos_weight': float(neg / max(1, pos)) if pos else 1.0,
             'p_at_k_values': p_at_k_values
         }
     }
     joblib.dump(bundle, OUT_PKL)
     print(f"\n✅ Model bundle saved -> {OUT_PKL}")
     print(f"Features used ({len(FEATURES_WITH_IF)}): {FEATURES_WITH_IF}")
+
+    # Final blocking show to keep windows open for screenshots
+    if not NO_PLOTS:
+        try:
+            print("\n(Press Ctrl+C to close figure windows.)")
+            plt.ioff()
+            plt.show()
+        except Exception:
+            pass
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Precision-first insider threat model (XGBoost).")
@@ -529,10 +585,11 @@ if __name__ == "__main__":
                         help="JSON list of K values for P@K display, e.g. \"[5,10,25,50,100]\".")
     parser.add_argument("--data_dir", type=str, default=DATA_DIR, help="Path to the datasets folder with CSVs.")
     parser.add_argument("--no_plots", action="store_true", help="Disable interactive plots (fast/headless).")
+    parser.add_argument("--fast", action="store_true", help="Faster run: fewer trees, fewer CV trials, smaller IF.")
     args = parser.parse_args()
 
-    # set global flag for plotting
     NO_PLOTS = bool(args.no_plots)
+    FAST = bool(args.fast)
 
     p_at_k_vals = json.loads(args.p_at_k_values)
     main(
@@ -541,6 +598,7 @@ if __name__ == "__main__":
         topk_export=args.topk_export,
         p_at_k_values=p_at_k_vals
     )
+
 
 
 

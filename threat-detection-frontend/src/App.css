@@ -457,6 +457,78 @@
 }
 .imdash-avatar__initials { font-weight: 800; font-size: .9rem; color: var(--im-text); }
 .imdash-avatar__icon { width: 22px; height: 22px; fill: none; stroke: var(--im-text-weak); stroke-width: 1.8; }
+/* Animate a CSS angle custom property safely */
+
+/* Animate an angle custom prop */
+@property --im-ray-angle {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+
+.imdash-glowwrap {
+  position: relative;
+  border-radius: 18px;        /* match card corners */
+  isolation: isolate;         /* its own stacking context */
+  overflow: visible;          /* let glow sit outside edge */
+}
+
+/* The inner card (content) sits ABOVE the glow */
+.imdash-glowwrap__inner {
+  position: relative;
+  z-index: 2;                 /* content above the ray */
+  border-radius: 18px;
+  background: var(--im-surface);
+  /* keep your regular subtle border without using real border */
+  box-shadow: var(--im-shadow), inset 0 0 0 1px var(--im-border);
+}
+
+/* The animated glow ray (kept OUTSIDE the card) */
+.imdash-glowwrap::before {
+  content: "";
+  position: absolute;
+  /* push the ray outside so blur doesn't enter the card */
+  inset: -10px;
+  border-radius: calc(18px + 10px);
+  pointer-events: none;
+  z-index: 1;
+
+  /* a small bright wedge + faint tail */
+  background: conic-gradient(
+    from var(--im-ray-angle),
+    rgba(34,211,238,0) 0deg,
+    rgba(34,211,238,0) 330deg,
+    rgba(34,211,238,.95) 340deg,
+    rgba(34,211,238,.35) 350deg,
+    rgba(34,211,238,0) 360deg
+  );
+
+  /* bloom the ray — now it's outside so it won't overlap the plot */
+  filter: blur(8px) saturate(1.15);
+  animation: imdash-ray-spin 8s linear infinite;
+}
+
+@keyframes imdash-ray-spin { to { --im-ray-angle: 360deg; } }
+
+.im-theme-dark .imdash-glowwrap::before {
+  filter: blur(10px) saturate(1.2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .imdash-glowwrap::before { animation: none; }
+}
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
