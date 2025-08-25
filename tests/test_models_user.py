@@ -1,7 +1,7 @@
 # tests/test_models_user.py
 
 def test_password_hash_and_check(user):
-    # correct password should match
+
     assert user.check_password("secret") is True,\
         " Correct password should validate successfully"
     print("Test Passed: Correct password validated successfully ")

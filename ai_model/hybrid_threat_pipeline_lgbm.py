@@ -1,20 +1,19 @@
 import os, glob, joblib, numpy as np, pandas as pd, argparse, json
 from datetime import datetime
 from typing import Tuple
+from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import StandardScaler
+from sklearn.ensemble import IsolationForest, RandomForestClassifier
+from sklearn.model_selection import GroupKFold, RandomizedSearchCV
+from sklearn.metrics import accuracy_score
+from xgboost import XGBClassifier
 
-# Silence macOS Tk deprecation noise (does not affect training)
 os.environ.setdefault("TK_SILENCE_DEPRECATION", "1")
+PLOT_MODE = "auto"
+PLOTS_DIR = None
 
-# =============================
-# Plotting mode (can be overridden by CLI)
-# =============================
-PLOT_MODE = "auto"  # "show" | "save" | "none" | "auto"
-PLOTS_DIR = None     # set after HERE is known
-
-# ---------- Matplotlib backend handling (non-blocking) ----------
 import matplotlib
 try:
-    # Try a GUI backend first (Mac: "MacOSX" if available; fallback to TkAgg)
     try:
         matplotlib.use("MacOSX")
     except Exception:
@@ -23,18 +22,8 @@ except Exception:
     matplotlib.use("Agg")  # headless fallback (no windows)
 
 import matplotlib.pyplot as plt
-plt.ion()  # interactive mode on (windows can appear without blocking when 'show')
+plt.ion()
 
-from sklearn.impute import SimpleImputer
-from sklearn.preprocessing import StandardScaler
-from sklearn.ensemble import IsolationForest
-from sklearn.model_selection import GroupKFold, RandomizedSearchCV
-from sklearn.metrics import (
-    classification_report, confusion_matrix, roc_auc_score, average_precision_score,
-    precision_recall_curve, roc_curve, f1_score, accuracy_score
-)
-
-from xgboost import XGBClassifier
 
 # =============================
 # Defaults / Config
@@ -67,7 +56,7 @@ ROLL_WINDOWS = [7, 14, 30]
 IFOREST_CONTAM = 0.03
 
 # Precision-first selection targets (evaluation view)
-DEFAULT_P_AT_K_VALUES = [5, 10, 25, 50, 100, 200]
+DEFAULT_P_AT_K_VALUES = [5, 10, 25, 50, 100, 200]  # (kept for plotting, but we won't print P@K)
 DEFAULT_ALERT_RATE = 0.001     # 0.1% of test as alert budget threshold
 DEFAULT_TOPK_EXPORT = 200      # rows to export for manual review
 
@@ -104,16 +93,14 @@ def _show_now(title: str = "figure"):
     # Decide behavior for "auto"
     mode = PLOT_MODE
     if PLOT_MODE == "auto":
-        # If backend is non-interactive -> save; otherwise show
         non_interactive = ("agg", "pdf", "svg", "ps", "cairo")
         mode = "save" if any(b in backend for b in non_interactive) else "show"
 
     if mode == "show":
         try:
             plt.show(block=False)
-            plt.pause(1.0)  # short pause; not performance heavy
+            plt.pause(1.0)
         except Exception:
-            # If showing fails (e.g., headless), fallback to save
             mode = "save"
         else:
             plt.close(fig)
@@ -227,7 +214,7 @@ def print_quantiles(scores: np.ndarray, label: str):
     print(f"\nScore quantiles ({label}): 50% {qs[0]:.4f} | 90% {qs[1]:.4f} | 95% {qs[2]:.4f} | "
           f"99% {qs[3]:.4f} | 99.5% {qs[4]:.4f} | 99.9% {qs[5]:.4f}")
 
-# ---------- Display-only plotting helpers ----------
+# ---------- Plotting helpers (unchanged visuals; we won't print extra metrics) ----------
 def _show_confusion_heatmap(cm, title="Confusion Matrix"):
     fig, ax = plt.subplots(figsize=(4.6, 4.1))
     ax.imshow(cm, interpolation="nearest")
@@ -241,6 +228,7 @@ def _show_confusion_heatmap(cm, title="Confusion Matrix"):
     _show_now(title)
 
 def _show_roc_pr(y_true, scores, title_prefix=""):
+    from sklearn.metrics import precision_recall_curve, roc_curve
     # ROC
     try:
         fpr, tpr, _ = roc_curve(y_true, scores)
@@ -299,50 +287,35 @@ def _show_feature_importance(names, importances, topn=20):
     except Exception as e:
         print(f"(could not display feature importances: {e})")
 
-def _show_p_at_k_curve(y_true, scores, ks):
-    order = np.argsort(scores)[::-1]
-    ys = []
-    for K in ks:
-        k = min(K, len(order))
-        ys.append(precision_at_k(y_true[order], scores[order], k))
-    fig, ax = plt.subplots(figsize=(5.0, 4.0))
-    ax.plot(ks, ys, marker="o")
-    ax.set_title("Precision@K")
-    ax.set_xlabel("K (top alerts)"); ax.set_ylabel("Precision")
-    ax.grid(True, alpha=0.3)
+# >>> NEW: compact comparison plot <<<
+def _plot_model_comparison(metrics: dict, title="Model Comparison: Accuracy & Precision"):
+
+    models = list(metrics.keys())
+    accs   = [metrics[m]["acc"]  for m in models]
+    precs  = [metrics[m]["prec"] for m in models]
+
+    x = np.arange(len(models))
+    width = 0.35
+
+    fig, ax = plt.subplots(figsize=(6.5, 4.2))
+    b1 = ax.bar(x - width/2, accs,  width, label="Accuracy")
+    b2 = ax.bar(x + width/2, precs, width, label="Precision")
+
+    ax.set_title(title)
+    ax.set_xticks(x)
+    ax.set_xticklabels(models)
+    ax.set_ylim(0, 1.0)
+    ax.set_ylabel("Score")
+    ax.legend()
+
+    for bars in (b1, b2):
+        for bar in bars:
+            h = bar.get_height()
+            ax.annotate(f"{h:.3f}", xy=(bar.get_x()+bar.get_width()/2, h),
+                        xytext=(0, 4), textcoords="offset points", ha="center", va="bottom", fontsize=9)
+
     plt.tight_layout()
-    _show_now("Precision_at_K")
-
-def _eval_and_print(y_true, scores, thr, title="TEST"):
-    y_hat = (scores >= thr).astype(int)
-    cm = confusion_matrix(y_true, y_hat)
-    tp = int(((y_true == 1) & (y_hat == 1)).sum())
-    fp = int(((y_true == 0) & (y_hat == 1)).sum())
-    fn = int(((y_true == 1) & (y_hat == 0)).sum())
-    tn = int(((y_true == 0) & (y_hat == 0)).sum())
-
-    try:
-        roc = roc_auc_score(y_true, scores)
-    except Exception:
-        roc = float("nan")
-    try:
-        pr  = average_precision_score(y_true, scores)
-    except Exception:
-        pr = float("nan")
-
-    acc = accuracy_score(y_true, y_hat)
-    f1  = f1_score(y_true, y_hat, zero_division=0)
-    prec = tp / (tp + fp) if (tp + fp) > 0 else 0.0
-    rec  = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-
-    print(f"\n==== {title} ====")
-    print(f"Samples: {len(y_true)}")
-    print(f"Accuracy: {acc:.4f} | F1: {f1:.4f} | Precision: {prec:.4f} | Recall: {rec:.4f}")
-    print(f"ROC-AUC: {roc:.4f} | PR-AUC: {pr:.4f}")
-    print("Confusion Matrix [TN FP; FN TP]:")
-    print(cm)
-
-    return {"acc":acc, "f1":f1, "precision":prec, "recall":rec, "roc_auc":roc, "pr_auc":pr, "cm":cm}
+    _show_now("Model_Comparison_Accuracy_Precision")
 
 # =============================
 # Main
@@ -361,11 +334,9 @@ def main(
     missing = required - set(df.columns)
     if missing:
         raise ValueError(f"Missing required columns: {missing}")
-
     df['timestamp'] = pd.to_datetime(df['timestamp'], errors='coerce')
     df = df.dropna(subset=['timestamp']).sort_values('timestamp').reset_index(drop=True)
 
-    # Feature engineering
     df = add_time_flags(df)
     df = add_user_rolling(df)
     df = add_user_robust_zscores(df)
@@ -501,6 +472,7 @@ def main(
         verbose=1,
         n_jobs=-1
     )
+
     # Optional downsample of training rows for fast demo
     if FAST:
         max_rows = 80_000
@@ -513,72 +485,62 @@ def main(
     search.fit(X_train, y_train)
     best_xgb = search.best_estimator_
 
-    # Evaluate on TEST
+    # === Evaluate XGBoost on TEST with alert-budget threshold ===
     p_test = np.clip(best_xgb.predict_proba(X_test)[:, 1], 1e-9, 1-1e-9)
     print_quantiles(p_test, "test")
 
-    # Alert budget threshold at the SAME rate used in CV
     n_test = len(p_test)
     k_budget = max(1, int(np.ceil(n_test * alert_rate)))
     thr = float(np.partition(p_test, -k_budget)[-k_budget]) if k_budget < n_test else 1.0
 
-    raw_k = (p_test >= thr).sum()
-    print(f"\nCandidates: raw>thr={raw_k}")
-
-    # Report
     y_hat = (p_test >= thr).astype(int)
-    print("\n📟 Report at chosen threshold:\n")
-    print(classification_report(y_test, y_hat, digits=4, zero_division=0))
-    cm = confusion_matrix(y_test, y_hat)
-    print("Confusion Matrix:\n", cm)
-    try:
-        print(f"ROC-AUC: {roc_auc_score(y_test, p_test):.4f}  |  PR-AUC: {average_precision_score(y_test, p_test):.4f}")
-    except Exception:
-        pass
-    tp = int(((y_test == 1) & (y_hat == 1)).sum())
-    fp = int(((y_test == 0) & (y_hat == 1)).sum())
-    fn = int(((y_test == 1) & (y_hat == 0)).sum())
-    tn = int(((y_test == 0) & (y_hat == 0)).sum())
-    P = tp / (tp + fp) if (tp + fp) > 0 else 0.0
-    R = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-    print(f"Chosen threshold (p>=): {thr:.4f}  [alert_budget(rate={alert_rate*100:.3f}%)]")
-    print(f"Achieved Precision: {P:.4f} | Recall: {R:.4f} | TP={tp} FP={fp} FN={fn} TN={tn}")
+    acc_xgb = accuracy_score(y_test, y_hat)
+    prec_xgb = ( ( (y_test==1) & (y_hat==1) ).sum() ) / max(1, (y_hat==1).sum())
 
-    # Precision@K table
-    print("\nPrecision@K (selection score ranking):")
-    order = np.argsort(p_test)[::-1]
-    for K in p_at_k_values:
-        k = min(K, len(order))
-        prec_k = precision_at_k(y_test[order], p_test[order], k)
-        print(f"P@{K:<4}= {prec_k:.3f}")
+    # ---- ONLY PRINT Accuracy and Precision (XGBoost) ----
+    print(f"[XGBoost] Accuracy: {acc_xgb:.4f} | Precision: {prec_xgb:.4f}")
 
-    # --------- EXTRA: compact metrics + figures ----------
-    _ = _eval_and_print(y_test, p_test, thr, title="TEST (Full)")
+    # === RandomForest baseline (no tuning), same features and thresholding ===
+    rf_trees = 120 if FAST else 300
+    rf = RandomForestClassifier(
+        n_estimators=rf_trees,
+        max_depth=None,
+        min_samples_leaf=2,
+        class_weight="balanced_subsample",
+        n_jobs=-1,
+        random_state=42
+    )
+    rf.fit(X_train, y_train)
+    p_test_rf = rf.predict_proba(X_test)[:, 1]
+    # threshold at the SAME alert budget
+    thr_rf = float(np.partition(p_test_rf, -k_budget)[-k_budget]) if k_budget < n_test else 1.0
+    y_hat_rf = (p_test_rf >= thr_rf).astype(int)
+    acc_rf = accuracy_score(y_test, y_hat_rf)
+    prec_rf = ( ( (y_test==1) & (y_hat_rf==1) ).sum() ) / max(1, (y_hat_rf==1).sum())
 
+    # ---- ONLY PRINT Accuracy and Precision (RandomForest) ----
+    print(f"[RandomForest] Accuracy: {acc_rf:.4f} | Precision: {prec_rf:.4f}")
+
+    # >>> NEW: model comparison plot <<<
     if not NO_PLOTS:
-        _show_confusion_heatmap(confusion_matrix(y_test, (p_test >= thr).astype(int)),
-                                title="Confusion Matrix (Full Test)")
-        _show_roc_pr(y_test, p_test, title_prefix="Full_Test")
-        _show_score_hist(p_test, title="Score Distribution (Full Test)")
+        _plot_model_comparison(
+            {
+                "XGBoost":     {"acc": float(acc_xgb), "prec": float(prec_xgb)},
+                "RandomForest":{"acc": float(acc_rf),  "prec": float(prec_rf)}
+            },
+            title=f"Accuracy & Precision @ alert_rate={alert_rate:.3%}"
+        )
+
+    # ----- Optional visuals (kept; do not print extra metrics) -----
+    if not NO_PLOTS:
+        from sklearn.metrics import confusion_matrix
+        _show_confusion_heatmap(confusion_matrix(y_test, y_hat), title="Confusion Matrix (XGB)")
+        _show_roc_pr(y_test, p_test, title_prefix="XGB_Test")
+        _show_score_hist(p_test, title="Score Distribution (XGB)")
         _show_score_quantiles(p_test)
-        _show_p_at_k_curve(y_test, p_test, p_at_k_values)
 
-        # Subset metrics (first 20k/40k rows if available)
-        def _subset_eval(label, n):
-            m = min(n, len(y_test))
-            if m <= 0:
-                return
-            print(f"\n--- Subset evaluation: first {m} rows ({label}) ---")
-            _eval_and_print(y_test[:m], p_test[:m], thr, title=f"TEST (first {m}) – {label}")
-            _show_confusion_heatmap(confusion_matrix(y_test[:m], (p_test[:m] >= thr).astype(int)),
-                                    title=f"Confusion Matrix (first {m}) – {label}")
-            _show_roc_pr(y_test[:m], p_test[:m], title_prefix=f"Subset_{label}")
-            _show_score_hist(p_test[:m], title=f"Score Distribution (first {m}) – {label}")
-
-        _subset_eval("20k", 20_000)
-        _subset_eval("40k", 40_000)
-
-    # Export artifacts
+    # Export artifacts (unchanged, still based on XGBoost ranking)
+    order = np.argsort(p_test)[::-1]
     topK = min(DEFAULT_TOPK_EXPORT, len(test_df))
     head_idx = order[:topK]
     top_out = test_df.iloc[head_idx].copy()
@@ -597,17 +559,13 @@ def main(
         importances = best_xgb.feature_importances_
         fi = pd.DataFrame({"feature": FEATURES_WITH_IF, "importance": importances}).sort_values("importance", ascending=False)
         fi.to_csv(OUT_FEATURE_IMPORTANCE, index=False)
-        top10 = fi.head(10).to_dict("records")
-        print("🏷️ Top feature importances (gain):")
-        for r in top10:
-            print(f"  {r['feature']:<35} {r['importance']:.6f}")
         if not NO_PLOTS:
             _show_feature_importance(np.array(FEATURES_WITH_IF), np.array(importances), topn=20)
         print(f"📄 Full importances saved -> {OUT_FEATURE_IMPORTANCE}")
     except Exception as e:
         print(f"(could not export/plot feature importances: {e})")
 
-    # Save bundle (training unchanged)
+    # Save bundle (XGBoost only; unchanged)
     bundle = {
         'imputer': imputer,
         'scaling_module': scaler,
@@ -670,6 +628,7 @@ if __name__ == "__main__":
         topk_export=args.topk_export,
         p_at_k_values=p_at_k_vals
     )
+
 
 
 

@@ -14,12 +14,8 @@ ADMIN_PASSWORD = (
 
 @receiver(post_migrate)
 def ensure_admin_after_migrate(sender, using, **kwargs):
-    """
-    After ThreatDetection migrations:
-      - If a user exists with username=admin OR email=admin@gmail.com, elevate THAT user.
-      - Otherwise create exactly one new 'admin' user.
-      - Never create admin1/admin2, etc.
-    """
+
+
     # Only run when this app finishes migrating
     if getattr(sender, "label", None) != "threatdetection":
         return

@@ -15,6 +15,7 @@ ChartJS.register(
 );
 
 
+
 const neonGlowPlugin = {
   id: 'neonGlow',
   afterDatasetsDraw(chart, _args, opts) {
